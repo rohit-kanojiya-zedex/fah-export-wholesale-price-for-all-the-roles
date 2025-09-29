@@ -1,0 +1,184 @@
+// Step 1: Create the admin page for export
+function fah_wholesale_export_page() {
+    ?>
+    <div class="wrap">
+        <h2>Export Wholesale Data</h2>
+        <form method="post" action="">
+            <input type="hidden" name="export_wholesale_csv" value="1" />
+            <input type="submit" class="button-primary" value="Export Wholesale Data to CSV">
+        </form>
+    </div>
+    <?php
+}
+
+//add_action('admin_menu', function () {
+//    add_menu_page('Wholesale Export', 'Wholesale Export', 'manage_options', 'fah-wholesale-export', 'fah_wholesale_export_page');
+//});
+
+// Step 2: Catch request before page renders
+add_action('admin_init', function () {
+    if (isset($_POST['export_wholesale_csv'])) {
+        fah_export_products_csv_tt();
+    }
+});
+
+// Step 3: The CSV export function
+function fah_export_products_csv_tt() {
+    global $wpdb;
+
+    $roles = maybe_unserialize(get_option(WWP_OPTIONS_REGISTERED_CUSTOM_ROLES));
+    $product_ids = $wpdb->get_col("
+        SELECT ID 
+        FROM {$wpdb->posts} 
+        WHERE post_type = 'product' 
+        AND post_status = 'publish'
+    ");
+
+    $wholesale_data = fah_get_wholesale_price($product_ids, $roles);
+
+    // Clean any buffered output (fix for HTML issue)
+    if (ob_get_length()) ob_end_clean();
+
+    // Force download headers
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="wholesale-products.csv"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+
+    // CSV header row
+    fputcsv($output, [
+        'Product ID',
+        'Product Title',
+        'Regular Price',
+        'Wholesale Prices',
+        'Wholesale Minimum Order Quantity',
+        'Wholesale Order Quantity Step'
+    ]);
+
+    // Output rows
+    foreach ($wholesale_data as $row) {
+        fputcsv($output, [
+            $row['product_id'],
+            $row['product_title'],
+            $row['regular_price'],
+            implode("\n", $row['wholesale_price']),
+            implode("\n", $row['wholesale_minimum_order_quantity']),
+            implode("\n", $row['wholesale_order_quantity_step']),
+        ]);
+    }
+
+    fclose($output);
+    exit;
+}
+
+// Step 4: Function to collect wholesale product prices and details
+function fah_get_wholesale_price($product_ids, $roles) {
+    $product_detail_collector = [];
+    $meta_keys = [
+        "wholesale_minimum_order_quantity" => "_wholesale_minimum_order_quantity",
+        "wholesale_order_quantity_step" => "_wholesale_order_quantity_step"
+    ];
+
+    foreach ($product_ids as $post_id) {
+        $product = wc_get_product($post_id);
+        if (!$product) continue;
+
+        $variation_ids = $product->get_children();
+
+        $product_data = [
+            "product_id" => $post_id,
+            "product_title" => $product->get_name(),
+            "regular_price" => '',
+            "wholesale_price" => [],
+            "wholesale_minimum_order_quantity" => [],
+            "wholesale_order_quantity_step" => []
+        ];
+
+        // ---------- Regular price ----------
+        if ($variation_ids) {
+            // Variable product: collect all variation regular prices
+            $regular_prices = [];
+            foreach ($variation_ids as $variation_id) {
+                $variation = wc_get_product($variation_id);
+                if ($variation && $variation->get_regular_price() !== '') {
+                    $regular_prices[] = (float) $variation->get_regular_price();
+                }
+            }
+
+            if (!empty($regular_prices)) {
+                $min_reg = min($regular_prices);
+                $max_reg = max($regular_prices);
+
+                if ($min_reg === $max_reg) {
+                    $product_data["regular_price"] = strip_tags(wc_price($min_reg));
+                } else {
+                    $product_data["regular_price"] = strip_tags(wc_price($min_reg)) . ' - ' . strip_tags(wc_price($max_reg));
+                }
+            }
+
+        } else {
+            // Simple product
+            $reg_price = $product->get_regular_price();
+            if ($reg_price !== '') {
+                $product_data["regular_price"] = strip_tags(wc_price($reg_price));
+            }
+        }
+
+        // ---------- Wholesale pricing per role ----------
+        foreach ($roles as $role_key => $role) {
+            if ($variation_ids) {
+                $prices = [];
+                foreach ($variation_ids as $variation_id) {
+                    $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($variation_id, [$role_key]);
+                    $price = $price_arr['wholesale_price'];
+                    if (!empty($price)) {
+                        $prices[] = $price;
+                    }
+                }
+
+                if (!empty($prices)) {
+                    $min_price = min($prices);
+                    $max_price = max($prices);
+
+                    if ($min_price === $max_price) {
+                        $product_data["wholesale_price"][] = "{$role['roleName']} price is: " . strip_tags(wc_price($min_price));
+                    } else {
+                        $product_data["wholesale_price"][] = "{$role['roleName']} price is: " . strip_tags(wc_price($min_price)) . ' - ' . strip_tags(wc_price($max_price));
+                    }
+                }
+
+                // MOQ + Step
+                foreach ($meta_keys as $key => $meta_key) {
+                    foreach ($variation_ids as $variation_id) {
+                        $val = get_post_meta($variation_id, $role_key . $meta_key, true);
+                        if (!empty($val)) {
+                            $product_data[$key][] = "{$role['roleName']} {$key} is: {$val}";
+                        }
+                        break;
+                    }
+                }
+
+            } else {
+                // Simple product wholesale
+                $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($post_id, [$role_key]);
+                $price = $price_arr['wholesale_price'];
+                if (!empty($price)) {
+                    $product_data["wholesale_price"][] = "{$role['roleName']} price is: " . strip_tags(wc_price($price));
+                }
+
+                foreach ($meta_keys as $key => $meta_key) {
+                    $val = get_post_meta($post_id, $role_key . $meta_key, true);
+                    if (!empty($val)) {
+                        $product_data[$key][] = "{$role['roleName']} {$key} is: {$val}";
+                    }
+                }
+            }
+        }
+
+        $product_detail_collector[] = $product_data;
+    }
+
+    return $product_detail_collector;
+}

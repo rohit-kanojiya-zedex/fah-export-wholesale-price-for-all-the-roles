@@ -1,0 +1,223 @@
+// Step 1: Create the admin page for export
+function fah_wholesale_export_page() {
+    ?>
+    <div class="wrap">
+        <h2>Export Wholesale Data</h2>
+        <form method="post" action="">
+            <input type="hidden" name="export_wholesale_csv" value="1" />
+            <input type="submit" class="button-primary" value="Export Wholesale Data to CSV">
+        </form>
+    </div>
+    <?php
+}
+
+add_action('admin_menu', function () {
+    add_menu_page('Wholesale Export', 'Wholesale Export', 'manage_options', 'fah-wholesale-export', 'fah_wholesale_export_page');
+});
+
+// Step 2: Catch request before page renders
+add_action('admin_init', function () {
+    if (isset($_POST['export_wholesale_csv'])) {
+        fah_export_products_csv_tt();
+    }
+});
+
+// Step 3: The CSV export function
+function fah_export_products_csv_tt() {
+    global $wpdb;
+
+    $roles = maybe_unserialize(get_option(WWP_OPTIONS_REGISTERED_CUSTOM_ROLES));
+    $product_ids = $wpdb->get_col("
+        SELECT ID 
+        FROM {$wpdb->posts} 
+        WHERE post_type = 'product' 
+        AND post_status = 'publish'
+    ");
+
+    $wholesale_data = fah_get_wholesale_price($product_ids, $roles);
+
+    // Clean any buffered output (fix for HTML issue)
+    if (ob_get_length()) ob_end_clean();
+
+    // Force download headers
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="wholesale-products.csv"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+
+    // CSV header row
+    fputcsv($output, [
+        'Product ID',
+        'Product Title',
+        'Regular Price',
+        'Cost of Good',
+        'SKU',
+        'TAX',
+        'Wholesale Price (Tier 4)',
+        'Wholesale Minimum Order Quantity (Tier 4)',
+        'Wholesale Order Quantity Step (Tier 4)',
+        'Product Type'
+    ]);
+
+    // Output rows
+    foreach ($wholesale_data as $row) {
+        fputcsv($output, [
+            $row['product_id'],
+            $row['product_title'],
+            $row['regular_price'],
+            $row['cost_of_good'],
+            $row['sku'],
+            $row['tax'],
+            $row['wholesale_price'],
+            $row['wholesale_minimum_order_quantity'],
+            $row['wholesale_order_quantity_step'],
+            $row['product_type']
+        ]);
+    }
+
+    fclose($output);
+    exit;
+}
+
+// Step 4: Function to collect wholesale product prices and details
+function fah_get_wholesale_price($product_ids, $roles) {
+    $product_detail_collector = [];
+    $meta_keys = [
+        "wholesale_minimum_order_quantity" => "_wholesale_minimum_order_quantity",
+        "wholesale_order_quantity_step"    => "_wholesale_order_quantity_step"
+    ];
+
+    // 🔹 Find the Tier 4 role key
+    $target_role_key = '';
+    foreach ($roles as $role_key => $role) {
+        if ($role['roleName'] == "Tier 4 (Main / 30% / Full)") {
+            $target_role_key = $role_key;
+            break;
+        }
+    }
+
+    if (empty($target_role_key)) {
+        return []; // If role not found, return empty
+    }
+
+    foreach ($product_ids as $post_id) {
+        $product = wc_get_product($post_id);
+        if (!$product) continue;
+
+        $variation_ids = $product->get_children();
+
+        // ---------- CASE 1: Variable product (each variation row) ----------
+        if ($variation_ids) {
+            foreach ($variation_ids as $variation_id) {
+                $variation = wc_get_product($variation_id);
+                if (!$variation) continue;
+
+                $product_data = [
+                    "product_id"                        => $variation_id,
+                    "product_title"                     => $product->get_name(),
+                    "regular_price"                     => '',
+                    "cost_of_good"                      => '',
+                    "sku"                               => $variation->get_sku(),
+                    "wholesale_price"                   => '',
+                    "wholesale_minimum_order_quantity"  => '',
+                    "wholesale_order_quantity_step"     => '',
+                    "tax"                               => '',
+                    "product_type"                      => 'variation'
+                ];
+
+                // Regular Price
+                $reg_price = $variation->get_regular_price();
+                if ($reg_price !== '') {
+                    $product_data["regular_price"] = html_entity_decode(strip_tags(wc_price($reg_price)));
+                }
+
+                // Cost of Good
+                $cog_val = get_post_meta($variation_id, '_wc_cog_cost', true);
+                if ($cog_val !== '') {
+                    $product_data["cost_of_good"] = html_entity_decode(strip_tags(wc_price($cog_val)));
+                }
+
+                // Wholesale Price
+                $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($variation_id, [$target_role_key]);
+                $price = $price_arr['wholesale_price'];
+                if (!empty($price)) {
+                    $product_data["wholesale_price"] = html_entity_decode(strip_tags(wc_price($price)));
+                }
+
+                // MOQ + Step
+                foreach ($meta_keys as $key => $meta_key) {
+                    $val = get_post_meta($variation_id, $target_role_key . $meta_key, true);
+                    if (!empty($val)) {
+                        $product_data[$key] = $val;
+                    }
+                }
+
+                // Tax Class → Tax Rate %
+                $tax_class = $variation->get_tax_class();
+                $tax_rates = WC_Tax::get_rates($tax_class);
+                if (!empty($tax_rates)) {
+                    $rate = reset($tax_rates);
+                    $product_data["tax"] = $rate['rate'] . '%';
+                }
+
+                $product_detail_collector[] = $product_data;
+            }
+        }
+        // ---------- CASE 2: Simple product ----------
+        else {
+            $product_data = [
+                "product_id"                        => $post_id,
+                "product_title"                     => $product->get_name(),
+                "regular_price"                     => '',
+                "cost_of_good"                      => '',
+                "sku"                               => $product->get_sku(),
+                "wholesale_price"                   => '',
+                "wholesale_minimum_order_quantity"  => '',
+                "wholesale_order_quantity_step"     => '',
+                "tax"                               => '',
+                "product_type"                      => 'simple'
+            ];
+
+            // Regular Price
+            $reg_price = $product->get_regular_price();
+            if ($reg_price !== '') {
+                $product_data["regular_price"] = html_entity_decode(strip_tags(wc_price($reg_price)));
+            }
+
+            // Cost of Good
+            $cog_val = get_post_meta($post_id, '_wc_cog_cost', true);
+            if ($cog_val !== '') {
+                $product_data["cost_of_good"] = html_entity_decode(strip_tags(wc_price($cog_val)));
+            }
+
+            // Wholesale Price
+            $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($post_id, [$target_role_key]);
+            $price = $price_arr['wholesale_price'];
+            if (!empty($price)) {
+                $product_data["wholesale_price"] = html_entity_decode(strip_tags(wc_price($price)));
+            }
+
+            // MOQ + Step
+            foreach ($meta_keys as $key => $meta_key) {
+                $val = get_post_meta($post_id, $target_role_key . $meta_key, true);
+                if (!empty($val)) {
+                    $product_data[$key] = $val;
+                }
+            }
+
+            // Tax Class → Tax Rate %
+            $tax_class = $product->get_tax_class();
+            $tax_rates = WC_Tax::get_rates($tax_class);
+            if (!empty($tax_rates)) {
+                $rate = reset($tax_rates);
+                $product_data["tax"] = $rate['rate'] . '%';
+            }
+
+            $product_detail_collector[] = $product_data;
+        }
+    }
+
+    return $product_detail_collector;
+}

@@ -1,0 +1,187 @@
+//Step 1 to add button in admin under product section
+function fah_add_export_button_under_products_menu() {
+    add_submenu_page(
+        'edit.php?post_type=product',             // Parent slug for "Products"
+        'Enable/Disable Export Button',           // Page title (top of admin page)
+        'Export Purchased/Category Products',              // Menu title (in sidebar under Products)
+        'manage_options',                         // Capability
+        'export_button_control',                  // Menu slug (used in URL)
+        'fah_render_expp_button_page'               // Callback to render the page
+    );
+}
+add_action('admin_menu', 'fah_add_export_button_under_products_menu');
+
+//Step 2 handle button click from admin to enable and disable
+function fah_render_expp_button_page() {
+    if (!empty($_POST['fah_toggle_expp_button'])) {
+        $current_state = get_option('admin_fah_toggle_expp_button_enabled', false);
+        update_option('admin_fah_toggle_expp_button_enabled', !$current_state);
+    }
+    ?>
+    <div class="wrap">
+        <h1>Export Purchased/Category Products Control</h1>
+        <form method="post">
+            <input type="hidden" name="fah_toggle_expp_button" value="1" />
+            <p>
+                <button type="submit" class="button button-primary">
+                    <?php echo get_option('admin_fah_toggle_expp_button_enabled') ? 'Disable' : 'Enable'; ?> Export Button
+                </button>
+            </p>
+        </form>
+    </div>
+    <?php
+}
+
+//to export Purchased product
+//step 3 we created button in frontend in this method (fah_purchased_products_content());
+
+//to export current category product
+//step 3 we created button in category page;
+add_action( 'woocommerce_before_main_content', 'fah_add_download_csv_form', 20 );
+function fah_add_download_csv_form() {
+    $is_button_enabled = get_option('admin_fah_toggle_expp_button_enabled', false);
+    $Current_user_role = WWP_Wholesale_Roles::getInstance()->getUserWholesaleRole();
+    $isActiveCategoryBtn = !empty($is_button_enabled) && !empty($Current_user_role[0]);
+
+    if ( is_product_category() && $isActiveCategoryBtn ) {
+        $term = get_queried_object();
+        ?>
+        <form class="fah_exp_category_container" method="post">
+            <input type="hidden" name="fah_exp_category_csv" value="1">
+            <input type="hidden" name="fah_current_page_cat_id" value="<?php echo esc_attr($term->term_id); ?>">
+            <button type="submit" class="button">Download CSV</button>
+        </form>
+        <?php
+    }
+}
+
+//Step 4 handle button click from frontend to download csv
+add_action('init', 'fah_export_purchased_products_csv');
+function fah_export_purchased_products_csv() {
+    // Check for required conditions: admin, user logged in, and one of the form keys set
+    if (is_admin() || !is_user_logged_in() || (!isset($_POST['fah_export_purchased_csv']) && !isset($_POST['fah_exp_category_csv']))) {
+        return;
+    }
+
+    $Product_ids = [];
+
+    // Check if the form is for "fah_export_purchased_csv" or "fah_exp_category_csv"
+    if (!empty($_POST['fah_export_purchased_csv'])) {
+        // Fetch purchased products by the current user
+        $Product_ids = fah_products_bought_by_curr_user(true);
+    } elseif (!empty($_POST['fah_exp_category_csv'])) {
+        // Fetch products in the current category
+        $Product_ids = get_posts([
+            'post_type'      => 'product',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'tax_query'      => [
+                [
+                    'taxonomy' => 'product_cat',
+                    'field'    => 'term_id',
+                    'terms'    => intval($_POST['fah_current_page_cat_id']),
+                ],
+            ],
+        ]);
+
+    }
+
+    $meta_keys = [
+        "wholesale_minimum_order_quantity" => "_wholesale_minimum_order_quantity",
+        "wholesale_order_quantity_step"    => "_wholesale_order_quantity_step"
+    ];
+
+    function fah_get_wholesale_price_current_user($product_id, $user_wholesale_role) {
+        $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($product_id, [$user_wholesale_role]);
+        return isset($price_arr['wholesale_price']) ? $price_arr['wholesale_price'] : 0;
+    }
+
+    $Current_user_role = WWP_Wholesale_Roles::getInstance()->getUserWholesaleRole();
+    $user_role_key     = !empty($Current_user_role[0]) ? $Current_user_role[0] : ''; // Safe role key
+
+
+    if (empty($Product_ids) || empty($user_role_key)) {
+        return;
+    }
+
+    $csv_data   = [];
+    $csv_data[] = ['Product Name', 'Price', 'SKU', 'Min Qty', 'Qty Step'];
+
+    foreach ($Product_ids as $id) {
+        $product       = wc_get_product($id);
+        if (!$product) continue;
+        $variationIds  = $product->get_children();
+        $price_display = '';
+        $min_qty       = '';
+        $qty_step      = '';
+
+        if (!empty($variationIds)) {
+            $prices = [];
+            $valid_variations = []; // ✅ store valid variation objects here
+
+            foreach ($variationIds as $variation_id) {
+                $variation = wc_get_product($variation_id);
+
+                if ($variation && $variation->get_status() === 'publish' && $variation->is_purchasable()) {
+                    $valid_variations[] = $variation; // keep it for reuse
+
+                    $variation_price = fah_get_wholesale_price_current_user($variation_id, $user_role_key);
+                    if (!empty($variation_price)) {
+                        $prices[] = (float) $variation_price;
+                    }
+                }
+            }
+
+            if (!empty($prices)) {
+                $min_price = min($prices);
+                $max_price = max($prices);
+
+                $price_display = ($min_price == $max_price)
+                    ? html_entity_decode(strip_tags(wc_price($min_price)))
+                    : html_entity_decode(strip_tags(wc_price($min_price))) . ' - ' . html_entity_decode(strip_tags(wc_price($max_price)));
+            }
+
+            // ✅ Get MOQ + Step from first valid variation
+            if (!empty($valid_variations)) {
+                $first_variation_id = $valid_variations[0]->get_id();
+                $min_qty  = get_post_meta($first_variation_id, $user_role_key . $meta_keys['wholesale_minimum_order_quantity'], true);
+                $qty_step = get_post_meta($first_variation_id, $user_role_key . $meta_keys['wholesale_order_quantity_step'], true);
+            }
+        } else {
+            // Simple product
+            $price = fah_get_wholesale_price_current_user($id, $user_role_key);
+            if (!empty($price)) {
+                $price_display = html_entity_decode(strip_tags(wc_price($price)));
+            }
+
+            $min_qty  = get_post_meta($id, $user_role_key . $meta_keys['wholesale_minimum_order_quantity'], true);
+            $qty_step = get_post_meta($id, $user_role_key . $meta_keys['wholesale_order_quantity_step'], true);
+        }
+
+        if (!empty($price_display)) {
+            $csv_data[] = [
+                $product->get_name(),
+                $price_display,
+                $product->get_sku(),
+                $min_qty,
+                $qty_step
+            ];
+        }
+    }
+
+    // Clean any buffered output (fix for HTML issue)
+    if (ob_get_length()) ob_end_clean();
+
+    // Output CSV
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment;filename=purchased-products.csv');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+    foreach ($csv_data as $row) {
+        fputcsv($output, $row);
+    }
+    fclose($output);
+    exit;
+}

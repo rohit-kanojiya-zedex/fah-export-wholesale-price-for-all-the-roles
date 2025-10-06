@@ -1,0 +1,3895 @@
+<?php
+/**
+ * Shoptimizer child theme functions
+ *
+ * @package shoptimizer
+ */
+
+/**
+ * Loads parent and child theme scripts.
+ */
+function add_cors_http_header(){
+header("Access-Control-Allow-Origin: *");
+}
+add_action('init','add_cors_http_header');
+
+function shoptimizer_child_enqueue_scripts() {
+    $parent_style    = 'shoptimizer-style';
+    $parent_base_dir = 'shoptimizer';
+    wp_enqueue_style( $parent_style, get_template_directory_uri() . '/style.css', array(), wp_get_theme( $parent_base_dir ) ? wp_get_theme( $parent_base_dir )->get( 'Version' ) : '' );
+
+    if ( is_rtl() ) {
+        wp_enqueue_style( 'shoptimizer-rtl', get_template_directory_uri() . '/rtl.css', array(), wp_get_theme( $parent_base_dir ) ? wp_get_theme( $parent_base_dir )->get( 'Version' ) : '' );
+    }
+
+    wp_enqueue_style( 'shoptimizer-child-style', get_stylesheet_directory_uri() . '/style.css', array( $parent_style ), wp_get_theme()->get( 'Version' ) );
+}
+
+add_action( 'wp_enqueue_scripts', 'shoptimizer_child_enqueue_scripts' );
+
+//REMOVE PART OF TEMPLATES
+remove_action( 'woocommerce_after_single_product_summary', 'woocommerce_output_related_products', 20 );
+remove_action( 'woocommerce_cart_collaterals', 'woocommerce_cross_sell_display' );
+
+/**
+ * Adjustments for FAH
+ * 
+ * 
+ */
+
+/** Disable Ajax Call from WooCommerce */
+function sert_dequeue_woocommerce_cart_fragments() { 
+    wp_dequeue_script('wc-cart-fragments'); 
+}
+
+add_action( 'wp_enqueue_scripts', 'sert_dequeue_woocommerce_cart_fragments', PHP_INT_MAX); 
+
+//QUANTITY FOR PRODUCTS
+/* How to Add a Quantity Field to Shop Pages in WooCommerce by Thembay */
+
+add_filter( 'woocommerce_loop_add_to_cart_link', 'quantity_inputs_for_woocommerce_loop_add_to_cart_link', 10, 2 );
+function quantity_inputs_for_woocommerce_loop_add_to_cart_link( $html, $product ) {
+    if ( $product && $product->is_type( 'simple' ) && $product->is_purchasable() && $product->is_in_stock() && ! $product->is_sold_individually() && $product->get_stock_quantity() > 1 ) {
+        $html .= '<div class="quantity-container buttons_added cart commercekit-pdp-simple-form">';
+        $html .= woocommerce_quantity_input( ['min_value' => 1, 'max_value' => $product->backorders_allowed() ? '' : $product->get_stock_quantity() ], $product, false );
+        $html .= '<div class="quantity-nav"><span class="quantity-button quantity-up plus"></span><span class="quantity-button quantity-down minus"></span></div>';
+        $html .= '</div>';
+    }else if($product && $product->is_type( 'simple' ) && $product->is_purchasable() && $product->is_in_stock() && ! $product->is_sold_individually() && $product->get_stock_quantity() == 1){
+        $html = '<div class="add_to_cart_without_qty">'.$html.'</div>';
+    }
+    return $html;
+}
+/**
+ * Add required JavaScript.
+ */
+function fah_shop_page_quantity_add_to_cart_handler() {
+    wc_enqueue_js( '
+
+        $(document).ready(function() {    
+            $(".order-form-app.app-root").attr("style","");
+
+            $(".payment_box.payment_method_eway #new").on("click", function(){
+                console.log("HELLO WORLD!!!");
+                $(".place-order #place_order").removeAttr("disabled");
+            });
+        });
+
+
+
+        $(".wc-prl-recommendations").addClass("columns-4");
+        $(".wc-prl-recommendations ul.products").removeClass("columns-4");
+
+        $("form.woocommerce-ordering").on("submit", function(e){
+            e.preventDefault();  // Prevent the form from submitting
+        });
+
+        $(".orderby").on("change", function(e){
+            e.preventDefault();
+            var selectedValue = $(this).val();
+            
+            const inputSearchElement = $("input[name=\"s\"]").val();
+            const inputPostElement = $("input[name=\"post_type\"]").val();
+            
+            let changeUrl="?";
+             if(inputSearchElement && inputPostElement){
+                changeUrl = `?s=${inputSearchElement}&post_type=${inputPostElement}&`
+             }
+
+            // Set the redirect URL based on the selected value
+            var redirectUrl = changeUrl+"orderby=" + selectedValue;
+            
+            // Redirect to the URL
+            window.location.href = redirectUrl;
+        });
+
+        $(".add_to_cart_button, .ct-woo-card-actions .button").each(function () {
+
+            var $thisbutton = $(this),
+                $form = $thisbutton.closest("li.product"),
+                id = $thisbutton.val(),
+                product_qty = $form.find("input[name=quantity]").val() || 1,
+                product_id = $form.find("input[name=product_id]").val() || id,
+                variation_id = $form.find("input[name=variation_id]").val() || 0;
+            $(this).attr("data-quantity",  product_qty);
+
+        });
+    
+        $(".woocommerce .products").on("click", ".quantity input", function(){return false;});
+        
+
+        var sort_by = $(".woocommerce-ordering select.orderby option:selected").val();
+
+        // $(".woocommerce-ordering select.orderby").on("change", function(){
+            
+        //  sort_by = $(".woocommerce-ordering select.orderby option:selected").val();
+        // });
+
+
+
+
+        $(".woocommerce .products").on("change input", ".quantity .qty", function() {
+            var add_to_cart_button = $(this).parents( ".product" ).find(".add_to_cart_button");
+            //For AJAX add-to-cart actions
+            add_to_cart_button.attr("data-quantity", $(this).val());
+
+            // For non-AJAX add-to-cart actions
+            const inputSearchElement = $("input[name=\"s\"]").val();
+            const inputPostElement = $("input[name=\"post_type\"]").val();
+             
+             let changeUrl="?";
+             if(inputSearchElement && inputPostElement){
+                changeUrl = `?s=${inputSearchElement}&post_type=${inputPostElement}&`
+             }
+            add_to_cart_button.attr("href",changeUrl+"add-to-cart=" + add_to_cart_button.attr("data-product_id") + "&quantity=" + $(this).val() + "&orderby=" + sort_by);
+        
+        });
+
+        //Fixed wholesale add to cart in shop not working
+        $(".woocommerce .products .quantity .qty").trigger("change");
+
+        // Trigger on Enter press
+        $(".woocommerce .products").on("keypress", ".quantity .qty", function(e) {
+            if ((e.which||e.keyCode) === 13) {
+                $( this ).parents(".product").find(".add_to_cart_button").trigger("click");
+            }
+        });
+        
+        
+        $( document ).on( "click", ".plus, .minus", function() {
+                    // Get values
+                    var $qty        = $( this ).parent(".quantity-nav").siblings( "div.quantity" ).find( ".qty"),
+                        currentVal  = parseFloat( $qty.val() ),
+                        max         = parseFloat( $qty.attr( "max" ) ),
+                        min         = parseFloat( $qty.attr( "min" ) ),
+                        step        = $qty.attr( "step" );
+
+                    // Format values
+                    if ( ! currentVal || currentVal === "" || currentVal === "NaN" ) currentVal = 0;
+                    if ( max === "" || max === "NaN" ) max = "";
+                    if ( min === "" || min === "NaN" ) min = 0;
+                    if ( step === "any" || step === "" || step === undefined || parseFloat( step ) === "NaN" ) step = 1;
+                    // Change the value
+                    if ( $( this ).is( ".plus" ) ) {
+                        if ( max && ( currentVal >= max ) ) {
+                            $qty.val( max );
+                        } else {
+                            $qty.val( currentVal + parseFloat( step ) );
+                        }
+                    } else {
+                        if ( min && ( currentVal <= min ) ) {
+                            $qty.val( min );
+                        } else if ( currentVal > 0 ) {
+                            $qty.val( currentVal - parseFloat( step ) );
+                        }
+                    }
+                    // Trigger change event
+                    $qty.trigger( "change" );
+                });
+        ');
+}
+add_action( 'init', 'fah_shop_page_quantity_add_to_cart_handler' );
+
+function add_exp_date($sprintf, $product, $args){
+    global $wpdb;
+    $string_with_shortcodes = "";
+    if(isset($product->id)){
+        $id = $product->id;
+        $args = array(
+            'post_type'     => 'product_variation',
+            'post_status'   => array( 'private', 'publish' ),
+            'numberposts'   => 1,
+            'orderby'       => 'menu_order',
+            'order'         => 'asc',
+            'post_parent'   => $id // get parent post-ID
+        );
+        $variations = get_posts( $args );
+        foreach($variations as $variation){
+            $var_id = get_post_meta($variation->ID,'wsvi_group_id', true);
+        }
+        
+        if(!empty($var_id )){
+            $id = $var_id;
+        }
+        $bbd = $wpdb->get_row('select expiry_date from '.$wpdb->prefix.'webis_pbet where post_id = '.  $id . ' and quantity > 0 order by expiry_date asc');
+        
+        if(!empty($bbd)){
+            $string_with_shortcodes = do_shortcode("<p class='best-before-text'>Best Before: ". date( 'M d, Y', strtotime($bbd->expiry_date) ) ."</p>");
+        }
+    }
+    
+    //return $backorder_string . $string_with_shortcodes . $sprintf;
+    return $string_with_shortcodes . $sprintf;
+}
+add_action( 'woocommerce_loop_add_to_cart_link', 'add_exp_date', 10, 3 );
+
+function add_exp_date_single_page(){
+    global $wpdb, $product;
+    $string_with_shortcodes = "";
+    $id = $product->get_ID();
+    
+    if(isset($id)){
+        $args = array(
+            'post_type'     => 'product_variation',
+            'post_status'   => array( 'private', 'publish' ),
+            'numberposts'   => 1,
+            'orderby'       => 'menu_order',
+            'order'         => 'asc',
+            'post_parent'   => $id // get parent post-ID
+        );
+        $variations = get_posts( $args );
+        foreach($variations as $variation){
+            $var_id = get_post_meta($variation->ID,'wsvi_group_id', true);
+        }
+        
+        if(!empty($var_id )){
+            $id = $var_id;
+        }
+        
+        $bbd = $wpdb->get_row('select expiry_date from '.$wpdb->prefix.'webis_pbet where post_id = '.  $id . ' and quantity > 0 order by expiry_date asc');
+       
+        if(!empty($bbd)){
+            $string_with_shortcodes = do_shortcode('<p class="wpbet_shop_expiry_dates" style="margin-bottom: 10px">
+                    <span class="wpbet_shop_expiry_date">Best before: '.date( 'd M, Y', strtotime($bbd->expiry_date) ).'</span>
+                </p>');
+        }
+    }
+    
+    if(!empty($var_id))
+        echo $string_with_shortcodes;
+}
+add_action( 'woocommerce_before_add_to_cart_form', 'add_exp_date_single_page', 5 );
+
+//Show BBD in cart
+add_action( 'woocommerce_get_item_data', 'woocommerce_set_bbd_item_data', 10, 2 );
+function woocommerce_set_bbd_item_data( $item_data, $cart_item ) {
+    global $wpdb;
+    $id = $cart_item['product_id'];
+    $args = array(
+        'post_type'     => 'product_variation',
+        'post_status'   => array( 'private', 'publish' ),
+        'numberposts'   => 1,
+        'orderby'       => 'menu_order',
+        'order'         => 'asc',
+        'post_parent'   => $id // get parent post-ID
+    );
+    $variations = get_posts( $args );
+    foreach($variations as $variation){
+        $var_id = get_post_meta($variation->ID,'wsvi_group_id', true);
+    }
+        
+    if(!empty($var_id )){
+        $id = $var_id;
+    }
+    
+    $bbd = $wpdb->get_results('select expiry_date, quantity from '.$wpdb->prefix.'webis_pbet where post_id = '. $id .' and quantity > 0 order by expiry_date asc', ARRAY_A);
+    if ( !empty($bbd) ) {
+        $qty = $cart_item['quantity'];
+        $pre = '';
+        $cnt = 0;
+        while($qty>0){
+            if($bbd[$cnt]['quantity']>0){
+                $exp_dates .= $pre.date('M d, Y',strtotime($bbd[$cnt]['expiry_date']))." x ". ($qty > $bbd[$cnt]['quantity'] ? $bbd[$cnt]['quantity'] : $qty);
+                $qty -= $bbd[$cnt]['quantity'];
+                $pre = ", ";
+                $cnt++;
+            }else{
+                break;
+            }
+        }
+        $item_data[] = array(
+            'key'       => 'Best Before',
+            'value'     => $exp_dates,
+        );
+    }
+    
+    $can_back_order = get_post_meta($cart_item['product_id'], '_backorders', true);
+    $product_stock = get_post_meta($cart_item['product_id'], '_stock', true);
+    if(($can_back_order == 'notify' || $can_back_order == 'yes') && $product_stock <= 0 ){
+       $item_data[] = array(
+            'key'       => 'Backorder',
+            'value'     => 'Available on backorder',
+        );
+    }
+    
+    return $item_data;
+}
+// Save cart item custom meta as order item meta data and display it everywhere on orders and email notifications.
+add_action( 'woocommerce_checkout_create_order_line_item', 'save_cart_item_bdd_as_order_item_meta', 10, 4 );
+function save_cart_item_bdd_as_order_item_meta( $item, $cart_item_key, $values, $order ) {
+    global $wpdb;
+    $meta_key = 'Best Before';
+    $id = $values['product_id'];
+    $args = array(
+        'post_type'     => 'product_variation',
+        'post_status'   => array( 'private', 'publish' ),
+        'numberposts'   => 1,
+        'orderby'       => 'menu_order',
+        'order'         => 'asc',
+        'post_parent'   => $id // get parent post-ID
+    );
+    $variations = get_posts( $args );
+    foreach($variations as $variation){
+        $var_id = get_post_meta($variation->ID,'wsvi_group_id', true);
+    }
+        
+    if(!empty($var_id )){
+        $id = $var_id;
+    }
+    $bbd = $wpdb->get_results('select expiry_date, quantity from '.$wpdb->prefix.'webis_pbet where post_id = '. $id .' and quantity > 0 order by expiry_date asc', ARRAY_A);
+    if ( !empty($bbd) ) {
+        $qty = $item['quantity'];
+        $pre = '';
+        $cnt = 0;
+        while($qty>0){
+            if($bbd[$cnt]['quantity']>0){
+                $exp_dates .= $pre.date('M d, Y',strtotime($bbd[$cnt]['expiry_date']))." x ". ($qty > $bbd[$cnt]['quantity'] ? $bbd[$cnt]['quantity'] : $qty);
+                $qty -= $bbd[$cnt]['quantity'];
+                $pre = ", ";
+                $cnt++;
+            }else{
+                break;
+            }
+        }
+        $item->update_meta_data( $meta_key, $exp_dates );
+    }
+    
+    $can_back_order = get_post_meta($values['product_id'], '_backorders', true);
+    $product_stock = get_post_meta($values['product_id'], '_stock', true);
+    if(($can_back_order == 'notify' || $can_back_order == 'yes') && $product_stock <= 0 ){
+        $item->update_meta_data( 'Backorder', 'Available on backorder' );
+    }
+
+}
+
+//ADD BACKORDER TEXT
+function fah_add_text_after_title() {
+    global $product;
+    //BackOrder
+    $can_back_order = get_post_meta($product->id, '_backorders', true);
+    $product_stock = get_post_meta($product->id, '_stock', true);
+    if(($can_back_order == 'notify' || $can_back_order == 'yes') && $product_stock <= 0){
+        echo '<em class="can-backorder">(available on backorder)</em>';
+    }
+}
+add_action('woocommerce_shop_loop_item_title','fah_add_text_after_title', 50);
+
+
+//CUSTOM CHECKOUT
+add_action( 'woocommerce_review_order_before_submit', 'fah_add_custom_checkout_checkbox', 9 );
+    
+function fah_add_custom_checkout_checkbox() {
+    $chosen_shipping = WC()->session->get('chosen_shipping_methods');
+    $is_international_shipping = $chosen_shipping[0]=='tree_table_rate:516375bf_international_shipping';
+    if($is_international_shipping){
+        woocommerce_form_field( '_fah_international_shipping_checkbox', array(
+            'type'          => 'checkbox',
+            'class'         => array('form-row privacy'),
+            'label_class'   => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+            'input_class'   => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+            'required'      => true,
+            'label'         =>'I understand that France At Home Pty Ltd is not liable for any food or products not allowed into your country and removed or refused by customs. Please note: Import duties, taxes, and charges are the buyer’s responsibility and are not included in the item price or shipping charges. We recommend checking with your country’s customs office to determine any additional costs before purchasing. France at Home is not liable for items seized or destroyed by customs. It is the buyer’s responsibility to ensure the items purchased can enter their country.',
+        ));
+    }
+
+
+    $its_bonne_maman_product = false;
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        if ( $product && $product->get_slug() == 'bonne-maman-advent-calendar' ) {
+            $its_bonne_maman_product = true;
+            break;
+        }
+    }
+
+    if($its_bonne_maman_product){
+        woocommerce_form_field( '_fah_preorder_checkbox', array(
+            'type'          => 'checkbox',
+            'class'         => array('form-row privacy'),
+            'label_class'   => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+            'input_class'   => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+            'required'      => true,
+            'label'         => 'I understand that orders containing pre-ordered/arriving soon products may be dispatched once all items are available. If you wish to have your order dispatched separately please contact our office on (03) 8339 7438  (additional charges may apply)',
+        ));
+    }
+
+
+
+    /* woocommerce_form_field( '_fah_holiday_checkbox', array(
+       'type'          => 'checkbox',
+       'class'         => array('form-row privacy'),
+       'label_class'   => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+       'input_class'   => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+       'required'      => true,
+       'label'         => 'I understand that France At Home is currently closed for the festive season and that my order will be prepared and dispatched upon the reopening of the warehouse from Monday 15th January 2024.',
+    ));
+
+    */
+
+    $has_dairy_product = false;
+    $is_express_shipping = $chosen_shipping[0]=='tree_table_rate:83c829a8_express_shipping';
+    $is_standard_shipping = $chosen_shipping[0]=='tree_table_rate:974b6884_standard';
+
+    $dairy_refri_args = array(
+        'taxonomy'     => 'product_cat',
+        'parent'       => 1972,
+        'orderby'      => 'name',
+        'order'        => 'ASC',
+        'hide_empty'   => false,
+        'fields'       => 'slugs',
+    );
+
+    $dairy_refri_cat = get_terms($dairy_refri_args);
+    $dairy_refri_cat[] = 'dairy-refrigerated';
+
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        $terms =  wc_get_product_terms( $product->get_id(), 'product_cat', array( 'fields' => 'all' ) );
+        foreach ( $terms as $term ) {
+            if (in_array(trim($term->slug), $dairy_refri_cat)){
+                $has_dairy_product= true;
+                break;
+            }
+        }
+        if ($has_dairy_product) {
+            break;
+        }
+    }
+    $is_dairy_and_express_shipping = $is_express_shipping && $has_dairy_product;
+
+    if(($is_standard_shipping || $is_express_shipping) && (!$has_dairy_product)){
+        woocommerce_form_field( '_fah_standard_shipping_checkbox', array(
+            'type'          => 'checkbox',
+            'class'         => array('form-row privacy'),
+            'label_class'   => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+            'input_class'   => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+            'required'      => true,
+            'label'         =>'I understand that Standard / Express shipping is not a temperature controlled service and therefore my order may be subject to fluctuating temperatures, more so during hotter periods. Although we take all great care in protecting sensitive products such as chocolates, we will not be held responsible if products melt or are damaged due to heat during transport and recommend selecting refrigerated or removing any products that may be affected. If you are unsure please contact our office on (03) 8339 7438 and we will be happy to assist.',
+        ));
+    }
+
+    if($is_dairy_and_express_shipping){
+        ?>
+        <div id="checkout-modal-content" style="display:none; max-height:200px; overflow: auto; padding: 20px;">
+            <h4>Express Terms & Conditions</h4>
+            <p>I understand that I have selected Express Shipping for an order containing products that require refrigeration. I acknowledge and agree to the following:</p>
+            <ol style="padding-left: 0;">
+                <li>Although my parcel will be packed with ice packs and thermal packaging, my parcel will not be stored or transported in a temperature-controlled environment and may be exposed to high temperatures beyond the control of France At Home Pty Ltd.</li>
+                <li>France At Home Pty Ltd cannot guarantee express delivery times, and any delays are outside of their control.</li>
+                <li>I accept full responsibility for any loss, damage, or spoilage of perishable items due to shipping delays or temperature exposure.</li>
+                <li>I understand that France At Home Pty Ltd will not provide refunds, replacements, or compensation for any loss or damage to perishable items caused by shipping delays.</li>
+            </ol>
+        </div>
+        <?php
+
+        //Add the checkbox with a link inside the label using woocommerce_form_field
+        woocommerce_form_field( '_fah_express_term_condition_checkbox', array(
+            'type'          => 'checkbox',
+            'class'         => array('form-row privacy'),
+            'label_class'   => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+            'input_class'   => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+            'label'         => __('I agree with all the following Express Terms and conditions.') . ' <a style="cursor:pointer" id="open-checkout-model" href="https://franceathome.com.au/express-shipping-terms-and-conditions">' . __('Click here to view') . '</a>',
+            'required'      => true,
+        ));
+    }
+
+}
+
+add_action( 'woocommerce_checkout_process', 'fah_add_checkout_checkbox_warning' );
+/**
+ * Alert if checkbox not checked
+ */ 
+function fah_add_checkout_checkbox_warning() {
+    $chosen_shipping = WC()->session->get('chosen_shipping_methods');
+    $is_international_shipping = $chosen_shipping[0]=='tree_table_rate:516375bf_international_shipping';
+    if($is_international_shipping){
+        if ( ! (int) isset( $_POST['_fah_international_shipping_checkbox'] ) ) {
+            wc_add_notice( __( 'Please read and accept international shipping conditions.' ), 'error' );
+        }
+    }
+     /*
+   
+    if ( ! (int) isset( $_POST['_fah_holiday_checkbox'] ) ) {
+        wc_add_notice( __( 'Please read and accept holiday break notification.' ), 'error' );
+    }*/
+
+    $its_bonne_maman_product = false;
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        if ( $product && $product->get_slug() == 'bonne-maman-advent-calendar' ) {
+            $its_bonne_maman_product = true;
+            break;
+        }
+    }
+    if($its_bonne_maman_product){
+        if ( ! (int) isset( $_POST['_fah_preorder_checkbox'] ) ) {
+            wc_add_notice( __( 'Please read and accept pre-order/arriving soon notification.' ), 'error' );
+        }
+    }
+
+
+    $has_dairy_product = false;
+    $is_standard_shipping = $chosen_shipping[0]=='tree_table_rate:974b6884_standard';
+    $is_express_shipping = $chosen_shipping[0]=='tree_table_rate:83c829a8_express_shipping';
+
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        $terms =  wc_get_product_terms( $product->get_id(), 'product_cat', array( 'fields' => 'all' ) );
+        foreach ( $terms as $term ) {
+            if(trim($term->slug) == 'dairy-refrigerated'){
+                $has_dairy_product= true;
+            }
+        }
+    }
+    $is_dairy_and_express_shipping = $is_express_shipping && $has_dairy_product;
+
+    if(($is_standard_shipping || $is_express_shipping) && (!$has_dairy_product)){
+        if ( ! (int) isset( $_POST['_fah_standard_shipping_checkbox'] ) ) {
+            wc_add_notice( __( 'Please read and accept standard shipping notification.' ), 'error' );
+        }
+    }
+
+    if($is_dairy_and_express_shipping){
+        if ( ! (int) isset( $_POST['_fah_express_term_condition_checkbox'] ) ) {
+            wc_add_notice( __( 'Please read and accept express shipping conditions.' ), 'error' );
+        }
+    }
+
+    if ( sanitize_text_field($_POST['authority_to_leave']) == 'default' ) {
+        wc_add_notice( __( '<strong>Authority to leave</strong> is a required field.' ), 'error' );
+    }
+
+}
+
+add_action( 'woocommerce_checkout_update_order_meta', 'fah_checkout_field_order_meta_db' );
+/**
+ * Add custom field as order meta with field value to database
+ */
+function fah_checkout_field_order_meta_db( $order_id ) {
+    if ( ! empty( $_POST['_fah_preorder_checkbox'] ) ) {
+        update_post_meta( $order_id, '_fah_preorder_checkbox', sanitize_text_field( $_POST['_fah_preorder_checkbox'] ) );
+    }
+    
+    if ( ! empty( $_POST['_fah_holiday_checkbox'] ) ) {
+        update_post_meta( $order_id, '_fah_holiday_checkbox', sanitize_text_field( $_POST['_fah_holiday_checkbox'] ) );
+    }
+    
+    if ( ! empty( $_POST['_fah_standard_shipping_checkbox'] ) ) {
+        update_post_meta( $order_id, '_fah_standard_shipping_checkbox', sanitize_text_field( $_POST['_fah_standard_shipping_checkbox'] ) );
+    }
+    
+    if ( ! empty( $_POST['signature_required_fee'] ) ) {
+        update_post_meta( $order_id, '_fah_signature_required', 'yes' );
+    }else{
+        update_post_meta( $order_id, '_fah_signature_required', 'no' );
+    }
+
+    if ( ! empty( $_POST['_fah_express_term_condition_checkbox'] ) ) {
+        update_post_meta( $order_id, '_fah_express_term_condition_checkbox', sanitize_text_field( $_POST['_fah_express_term_condition_checkbox'] ) );
+    }
+
+    if ( ! empty( $_POST['_fah_international_shipping_checkbox'] ) ) {
+        update_post_meta( $order_id, '_fah_international_shipping_checkbox', sanitize_text_field( $_POST['_fah_international_shipping_checkbox'] ) );
+    }
+
+}
+
+add_action( 'woocommerce_admin_order_data_after_billing_address', 'fah_checkout_field_display_admin_order_meta', 10, 1 );
+/**
+ * Display field value on the backend WooCOmmerce order
+ */
+function fah_checkout_field_display_admin_order_meta($order){
+    echo '<p><strong>'.__('Pre-Order T&C confimation').':</strong> ' . (!empty(get_post_meta( $order->get_id(), '_fah_preorder_checkbox', true ))? 'Yes': 'Not Applicable' ). '<p>';
+    echo '<p><strong>'.__('Standard shipping confirmation').':</strong> ' . (!empty(get_post_meta( $order->get_id(), '_fah_standard_shipping_checkbox', true ))? 'Yes': 'Not Applicable' ). '<p>'; 
+    echo '<p><strong>'.__('Holiday Break confirmation').':</strong> ' . (!empty(get_post_meta( $order->get_id(), '_fah_holiday_checkbox', true ))? 'Yes': 'Not Applicable' ). '<p>';
+    echo '<p><strong>'.__('Express Terms and Conditions').':</strong> ' . (!empty(get_post_meta( $order->get_id(), '_fah_express_term_condition_checkbox', true ))? 'Yes': 'No' ). '<p>';
+    echo '<p><strong>'.__('International Terms and Conditions').':</strong> ' . (!empty(get_post_meta( $order->get_id(), '_fah_international_shipping_checkbox', true ))? 'Yes': 'No' ). '<p>';
+
+    $delivery_note = get_the_author_meta( 'fah_user_delivery_note', $order->get_user_id() );
+    if(!empty($delivery_note)){
+    echo  '<h4>Delivery/Warehouse Note</h4> <p>'.$delivery_note.'</p>';
+    }
+}
+
+//add_action( 'woocommerce_admin_order_data_after_shipping_address', 'fah_shipping_display_admin_order_meta', 20, 1 );
+/**
+ * Display field value on the backend WooCOmmerce order
+ */
+function fah_shipping_display_admin_order_meta($order){
+    $signature_required = get_post_meta( $order->get_id(), '_fah_signature_required', true );
+    echo '<p><strong>'.__('Signature Required').':</strong> ' . (!empty($signature_required)? ucfirst($signature_required): 'Not Applicable' ). '<p>'; 
+}
+
+//add_filter('woocommerce_review_order_before_submit', 'add_g_captcha', 150);
+//add_filter('woocommerce_pay_order_before_submit','add_g_captcha', 10);
+function add_g_captcha(){
+    //if(!is_user_logged_in()){
+        echo '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
+        echo '<div class="g-recaptcha" data-sitekey="6LdHv5YUAAAAADAG21X1vIddtSjp6iIgHf9rd7gO" data-theme="light" data-widget-id="1"></div><br/>';
+    //}
+}
+
+add_action( 'woocommerce_checkout_before_order_review', 'bbloomer_edit_cart_checkout' );
+function bbloomer_edit_cart_checkout() {
+   echo '<a href="' . wc_get_cart_url() . '" class="checkout-edit-cart-button">Edit Cart</a>';
+}
+
+/*Rearrange Shipping*/
+add_filter( 'woocommerce_package_rates' , 'xa_sort_shipping_services_by_cost', 10, 2 );
+function xa_sort_shipping_services_by_cost( $rates, $package ) {
+    if ( ! $rates )  return;
+    
+    /*$rate_cost = array();
+    foreach( $rates as $rate ) {
+        $rate_cost[] = $rate->cost;
+    }
+    
+    // using rate_cost, sort rates.
+    array_multisort( $rate_cost, $rates );*/
+    
+    if (isset($rates['Mamis_Shippit_express'])) {
+        $wc_pickup_store = $rates['Mamis_Shippit_express'];
+        unset($rates['Mamis_Shippit_express']);
+        $rates['Mamis_Shippit_express']=$wc_pickup_store;
+    }
+    
+    if (isset($rates['tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria'])) {
+        $cnc = $rates['tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria'];
+        unset($rates['tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria']);
+        $rates['tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria']=$cnc;
+    }
+    
+    return $rates;
+}
+
+/*CUSTOM CODE FOR PICKUP DATE CHEKCOUT PAGE*/
+function fah_hide_pickup_date(){
+    echo '<script>
+    jQuery(document).ready(function($){
+        if($(\'[name="shipping_method[0]"]:checked\').val() == "tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria"){
+            $("#orddd-lite-checkout-fields").show()
+            $("#e_deliverydate").prop("required",true).prop("disabled",false)
+        }else{
+            $("#orddd-lite-checkout-fields").hide()
+            $("#e_deliverydate").prop("required",false).prop("disabled",true)
+        }
+            
+        $(".shipping_method").click(function(){
+            if($(\'[name="shipping_method[0]"]:checked\').val() == "tree_table_rate:eb36ee7e_click_and_collect_somerton_victoria"){
+                $("#orddd-lite-checkout-fields").show()
+                $("#e_deliverydate").prop("required",true).prop("disabled",false)
+            }else{
+                $("#orddd-lite-checkout-fields").hide()
+                $("#e_deliverydate").prop("required",false).prop("disabled",true)
+            }
+        })
+    })
+    
+    </script>';
+}
+add_action('woocommerce_review_order_after_shipping','fah_hide_pickup_date');
+
+//ADMIN ORDER PAGE ADJUSTMENT
+add_action( 'woocommerce_admin_order_data_after_shipping_address', 'fah_shipping_address_admin_order_meta', 10, 1 );
+function fah_shipping_address_admin_order_meta($order){
+
+    echo  '<h4>Shipping Method:</h4> '.$order->get_shipping_method().'';
+}
+
+//COUPON FORM
+//remove_action( 'woocommerce_after_checkout_form', 'woocommerce_checkout_coupon_form' );
+//remove_action( 'woocommerce_before_checkout_form', 'woocommerce_checkout_coupon_form', 10 );
+//add_action( 'woocommerce_before_checkout_form', 'woocommerce_checkout_coupon_form', 10 );
+
+//END CUSTOM CHECKOUT
+
+//EMAIL ADJUSTMENTS
+//add_filter('woocommerce_thankyou_order_received_text', 'woo_change_order_received_text', 10, 2 );
+function woo_change_order_received_text( $str, $order ) {
+    $new_str = $str . "
+<p>A confirmation email has been sent to your email; we recommend saving our email in your address book to prevent your important notification being missed.</p>
+<p>We endeavour to have all orders dispatched with 1 - 3 business days, for information regarding estimated transit times please click on the link below.</p>
+<p> <a href='https://franceathome.com.au/shipping-and-payment/'> https://franceathome.com.au/shipping-and-payment/</a></p>
+
+<p> If you have any questions, please contact our office on <a href='tel:+61383397438'> (03) 8339 7438.</a> and we will be happy to assist.</p>
+<p> <strong>Also, if you haven't already, you can join our email list to receive future product announcements and special offers from us. Please see the signup form below.</strong> </p>
+<p> à bientôt </p>
+<p> France At Home </p>";
+    return $new_str;
+}
+
+add_action( 'woocommerce_thankyou_paypal', 'woo_change_order_received_text_paypal', 10, 2 );
+function woo_change_order_received_text_paypal() {
+echo '<p> Your order will be dispatched between 1 - 3 business days, for information in regards to estimated transit times please click on the link below. </p>
+<p> <a href="https://franceathome.com.au/shipping-and-payment/"> https://franceathome.com.au/shipping-and-payment/</a></p>
+<p> Orders containing pre-ordered/arriving soon products <strong>will be dispatched once all items are available</strong>. </p>
+<p> If you wish to have your order dispatched separately please contact our office on <a href="tel:+61383397438">(03) 8339 7438</a>  (additional shipping charges may apply) </p>
+<p> A confirmation email has been sent to your email, we recommend saving our email in your address book to prevent your important notification being missed. </p>
+<p> If you have not received an email please contact our office on <a href="tel:+61383397438"> (03) 8339 7438.</a> </p>
+<p> <strong>Also, if you haven\'t already, you can join our email list to receive future product announcements and special offers from us. Please see the signup form below.</strong> </p>
+<p> à bientôt </p>
+<p> France At Home </p>';
+
+}
+
+add_filter( 'wp_mail_from_name', 'sender_name' );
+function sender_name( $original_email_from ) {
+    if($original_email_from == "WordPress"){
+        return 'France at Home';
+    }else{
+        return $original_email_from;
+    }
+}
+//ENF OF EMAIL ADJUSTMENT
+
+/*EXPECTED DATE OF PRODUCT*/
+// Display Fields
+add_action('woocommerce_product_options_general_product_data', 'woocommerce_product_custom_fields');
+
+function woocommerce_product_custom_fields()
+{
+    global $woocommerce, $post;
+    echo '<div class="product_custom_field">';
+    // Custom Product Text Field
+    woocommerce_wp_text_input(
+        array(
+            'id' => '_estimate_availability_date',
+            'placeholder' => 'Estimate Availability Date',
+            'label' => __('Est. Availability Date', 'woocommerce'),
+            'desc_tip' => 'true',
+            'type' => 'date'
+        )
+    );
+    echo '</div>';
+}
+
+/*WHOLESALE ORIG PRICE*/
+// Display Fields
+add_action('woocommerce_product_options_pricing', 'woocommerce_product_wholesale_price_orig');
+
+function woocommerce_product_wholesale_price_orig()
+{
+    global $woocommerce, $post;
+    echo '<div class="product_custom_field">';
+    // Custom Product Text Field
+    woocommerce_wp_text_input(
+        array(
+            'id' => '_wholesale_price_original',
+            'placeholder' => 'Wholesale Full website Original ($)',
+            'label' => __('Wholesale Full website Original ($)', 'woocommerce'),
+            'desc_tip' => 'true',
+            'type' => 'text',
+            'class' => 'wc_input_price',
+            'custom_attributes' => array( 'autocomplete' => 'off' )
+        )
+    );
+    echo '</div>';
+}
+
+// Exclude Product from user group
+//add_action( 'woocommerce_product_options_general_product_data', 'display_linked_products_data_custom_field' );
+function display_linked_products_data_custom_field() {
+    global $product_object, $post, $wp_roles;
+    $roles = unserialize(get_post_meta($_GET['post'],'_fah_exclude_role', true));
+    ?>
+    <p class="form-field">
+        <label for="subscription_toggle_products"><?php _e( 'Exclude user groups', 'woocommerce' ); ?></label>
+        <select class="wc-role-search" multiple="multiple" style="width: 50%;" id="_fah_exclude_role" name="_fah_exclude_role[]" data-placeholder="<?php esc_attr_e( 'Search for a role', 'woocommerce' ); ?>">
+            <option value="">--</option>
+            <?php
+                foreach ( $wp_roles->role_names as $k=>$v ) {
+                    echo '<option value="' . esc_attr( $k ) . '" '.(in_array($k,$roles)?'selected':'').'>' . $v . '</option>';
+                }
+            ?>
+        </select>
+        <script>jQuery('#_fah_exclude_role').select2()</script>
+    </p>
+    <?php
+}
+
+if ( ! function_exists( 'fah_is_current_user_role' ) ) {
+    /**
+     * Checks current user's role. Handles multiple roles per user.
+     */
+    function fah_is_current_user_role( $roles_to_check ) {
+        $current_user       = wp_get_current_user();
+        $current_user_roles = ( empty( $current_user->roles ) ? array( '' ) : $current_user->roles );
+        $roles_intersect    = array_intersect( $current_user_roles, $roles_to_check );
+        return ( ! empty( $roles_intersect ) );
+    }
+}
+if ( ! function_exists( 'fah_is_current_users' ) ) {
+
+    function fah_is_current_users( $user_to_check ) {
+        $current_user       = wp_get_current_user();
+        $roles_intersect    = in_array( $current_user->ID, $user_to_check );
+        return ( ! empty( $roles_intersect ) );
+    }
+}
+if ( ! function_exists( 'fah_do_hide_product' ) ) {
+    /**
+     * Checks if the product needs to be hidden.
+     */
+    function fah_do_hide_product( $product_id_to_check ) {
+
+        // TODO: You need to replace product IDs & user roles with your own here.
+        $roles_to_hide_for = get_post_meta($product_id_to_check,'_fah_exclude_role',true);
+        $roles_to_hide_for = !empty($roles_to_hide_for)?unserialize($roles_to_hide_for):array();
+        
+        //$users_to_hide_for = get_post_meta($product_id_to_check,'_fah_exclude_users',true);
+        //$users_to_hide_for = !empty($users_to_hide_for)?unserialize($users_to_hide_for):array();
+        // Check if the product must be hidden.
+        return (
+            //in_array( $product_id_to_check, $products_to_hide ) && // product ID match
+            //fah_is_current_users( $users_to_hide_for ) ||
+            fah_is_current_user_role( $roles_to_hide_for )         // user role match
+        );
+    }
+}
+//if(!is_admin()){
+    //add_filter( 'woocommerce_product_is_visible', 'fah_product_visible_by_user_role', PHP_INT_MAX, 2 );
+    if ( ! function_exists( 'fah_product_visible_by_user_role' ) ) {
+        /**
+         * Hides product from shop and search results by user role.
+         */
+        function fah_product_visible_by_user_role( $visible, $product_id ) {
+            return ( fah_do_hide_product( $product_id ) ? false : $visible );
+        }
+    }
+//}
+
+// Save Fields
+add_action('woocommerce_process_product_meta', 'woocommerce_product_custom_fields_save');
+function woocommerce_product_custom_fields_save($post_id)
+{
+    $woocommerce_custom_product_text_field = $_POST['_estimate_availability_date'];
+    update_post_meta($post_id, '_estimate_availability_date', esc_attr($woocommerce_custom_product_text_field));
+    
+    $woocommerce_custom_product_text_field = $_POST['_wholesale_price_original'];
+    update_post_meta($post_id, '_wholesale_price_original', esc_attr($woocommerce_custom_product_text_field));
+    
+    //EXCLUDE DISPLAY FROM PRODUCT BY JAY-AR 07-13-2021
+    $woocommerce_custom_product_text_field = !empty($_POST['_fah_exclude_role'])? serialize($_POST['_fah_exclude_role']):NULL;
+    update_post_meta($post_id, '_fah_exclude_role', $woocommerce_custom_product_text_field);
+    
+    $woocommerce_custom_product_text_field = !empty($_POST['_fah_exclude_users'])? serialize($_POST['_fah_exclude_users']):NULL;
+    update_post_meta($post_id, '_fah_exclude_users', $woocommerce_custom_product_text_field);
+    
+}
+
+/*PUT OUT OF STOCK ITEMS AT THE END OF CATALOG*/
+if(!is_admin()){
+    add_filter('posts_clauses', 'order_by_stock_status');
+    function order_by_stock_status($posts_clauses) {
+        global $wpdb;
+        // only change query on WooCommerce loops
+        if ((is_woocommerce() && (is_shop() || is_product_category() || is_product_tag() || is_product_taxonomy())) || basename(get_permalink())=="shop-online") {
+            $posts_clauses['join'] .= " LEFT JOIN $wpdb->postmeta total_sales ON ($wpdb->posts.ID = total_sales.post_id) and total_sales.meta_key = '_stock' ";
+            
+            $posts_clauses['join'] .= " LEFT JOIN $wpdb->postmeta isstockstatus ON ($wpdb->posts.ID = isstockstatus.post_id) and isstockstatus.meta_key = '_stock_status' ";
+            $posts_clauses['join'] .= " LEFT JOIN $wpdb->postmeta istockqty ON ($wpdb->posts.ID = istockqty.post_id) and istockqty.meta_key = '_stock' ";
+            
+            //$posts_clauses['orderby'] = " isstockstatus.meta_value asc, istockqty.meta_value DESC," . $posts_clauses['orderby'];
+            //$posts_clauses['orderby'] = " isstockstatus.meta_value asc, cast(total_sales.meta_value as unsigned) DESC,  " . $posts_clauses['orderby'];
+            //$posts_clauses['orderby'] = " istockqty.meta_value desc, isstockstatus.meta_value desc, cast(total_sales.meta_value as unsigned) DESC,  " . $posts_clauses['orderby'];
+            $posts_clauses['orderby'] = " FIELD(isstockstatus.meta_value, 'instock','outofstock','discontinued'), cast(total_sales.meta_value as unsigned) DESC,  " . $posts_clauses['orderby'];
+            //echo "<script>console.log('".$posts_clauses['orderby']."')</script>";
+            $posts_clauses['where'] =  $posts_clauses['where'];
+        }
+        return $posts_clauses;
+    }
+}
+
+/*CHANGE WHOLESALE ERROR MESSAGE*/
+add_filter('authenticate', function($user, $username, $password){
+    //if(is_wp_error($user) && isset($user->errors['authentication_failed']) && (in_array('WholesaleFullwebsite', (array)get_user_by('email', $username)->roles) || in_array('WholesaleFullwebsite', (array)get_user_by('login', $username)->roles)))
+    if(is_wp_error($user) && isset($user->errors['authentication_failed']) ){
+        $user->errors['authentication_failed'][0] = 'Your account has been closed, for any questions or to reactivate your 
+account please contact our office on (03) 8339 7438.';
+    }
+    return $user;
+
+}, 21, 3);
+
+/*WHOLESALE SALE PRICE DISPLAY*/
+$user = wp_get_current_user();
+if ( in_array( 'WholesaleFullwebsite', (array) $user->roles ) ) {
+     add_filter( 'woocommerce_get_price_html', 'fah_custom_price', 10 ,2 ); 
+}
+function fah_custom_price( $price, $product) {
+    global $current_user;
+    
+    if(in_array('WholesaleFullwebsite', (array) $current_user->roles)){
+        $ws_orig_price = get_post_meta($product->get_id(),'_wholesale_price_original',true);
+        if (!empty($ws_orig_price))
+        {
+            if( $product->is_type('simple') || $product->is_type('external') || $product->is_type('grouped') ) {
+                //$sale_price   = get_post_meta( $product->get_id(), 'WholesaleFullwebsite_wholesale_price', true );
+                //$sale_price = (!empty($sale_price))? $sale_price : get_post_meta( $product->get_id(), 'WholesaleFullwebsite_wholesale_price', true )*.3; 
+            
+                if( !empty($ws_orig_price) ) {
+                    return 'Before: <span class="custom_text" style="text-decoration: line-through;">$'.$ws_orig_price.'</span>'.$price;
+                }
+            }  
+        }else{
+           return $price; 
+        }
+    }
+        
+    return $price;
+}
+
+/*CATEGORY EXCLUDE*/
+function fah_exclude_category_search( $query ) {
+    if ( is_admin() || ! $query->is_main_query() )
+        return;
+
+    $query->set( 'cat', '-1390' );
+}
+add_action( 'pre_get_posts', 'fah_exclude_category_search', 1 );
+
+
+function my_taxonomy_args( $terms )
+{
+    if ( is_admin() )
+        return;
+        
+    $terms->query_vars['exclude'] = 1390;
+    return $terms;
+}
+add_action('pre_get_terms', 'my_taxonomy_args', 10, 2);
+
+/*CLEAR SHIPPING VALUES*/
+add_filter( 'woocommerce_checkout_get_value', 'clear_shipping_fields_values', 5, 2 );
+function clear_shipping_fields_values( $value, $input ) {
+    $keys = ['first_name','last_name','company','address_1','address_2','city','postcode','country','state','wooccm9','wooccm10'];
+    $key  = str_replace('shipping_', '', $input);
+    if( in_array($key, $keys) && is_checkout() ) {
+        $value = '';
+    }
+    return $value;
+}
+
+// Register new status
+    /*
+    ADDED BY: JAY-AR
+    UPDATED: 2022-06-23
+    */
+    function register_shipped_pending_payment_order_status() {
+        register_post_status( 'wc-shipped-to-pay', array(
+            'label'                     => 'Shipped - Pending Payment',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'Shipped - Pending Payment (%s)', 'Shipped - Pending Payment (%s)' )
+        ) );
+        
+        /*register_post_status( 'wc-on-hold-to-pay', array(
+            'label'                     => 'On Hold - Pending Payment',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'On Hold - Pending Payment (%s)', 'On Hold - Pending Payment (%s)' )
+        ) );*/
+        
+        register_post_status( 'wc-pack-hold-to-pay', array(
+            'label'                     => 'Packed / On Hold - Pending Payment',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'Packed / On Hold - Pending Payment (%s)', 'Packed / On Hold - Pending Payment (%s)' )
+        ) );
+        
+        register_post_status( 'wc-completed-to-pay', array(
+            'label'                     => 'Completed - Pending Payment',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'Completed - Pending Payment (%s)', 'Completed - Pending Payment (%s)' )
+        ) );
+        
+        register_post_status( 'wc-processing-accnt', array(
+            'label'                     => 'Processing - On Account (Pending Payment)',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'Processing - On Account (Pending Payment) (%s)', 'Processing - On Account (Pending Payment) (%s)' )
+        ) );
+        
+        register_post_status( 'wc-processing-pend', array(
+            'label'                     => 'Processing - Pending Payment',
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop( 'Processing - Pending Payment (%s)', 'Processing - Pending Payment (%s)' )
+        ) );
+    }
+    add_action( 'init', 'register_shipped_pending_payment_order_status' );
+    
+    // Add to list of WC Order statuses
+    function add_shipped_pending_payment_to_order_statuses( $order_statuses ) {
+     
+        $new_order_statuses = array();
+     
+        // add new order status after processing
+        foreach ( $order_statuses as $key => $status ) {
+     
+            $new_order_statuses[ $key ] = $status;
+     
+            /*if ( 'wc-processing' === $key ) {
+                $new_order_statuses['wc-shipped-to-pay'] = 'Shipped - Pending Payment';
+            }else */
+            if('wc-processing' === $key){
+                $new_order_statuses['wc-processing-accnt'] = 'Processing - On Account (Pending Payment)';
+                $new_order_statuses['wc-processing-pend'] = 'Processing - Pending Payment';
+            }
+            elseif('wc-completed' === $key){
+               // $new_order_statuses['wc-on-hold-to-pay'] = 'On Hold - Pending Payment';
+                $new_order_statuses['wc-pack-hold-to-pay'] = 'Packed / On Hold - Pending Payment';
+                $new_order_statuses['wc-completed-to-pay'] = 'Completed - Pending Payment';
+                
+            }
+        }
+     
+        return $new_order_statuses;
+    }
+    add_filter( 'wc_order_statuses', 'add_shipped_pending_payment_to_order_statuses' );
+
+if ( is_admin() ) {
+    /*ADD COLUMN TO ORDER LIST*/
+    //add_filter( 'manage_edit-shop_order_columns', 'custom_shop_order_column',11);
+    function custom_shop_order_column($columns)
+    {
+        $reordered_columns = array();
+    
+        foreach( $columns as $key => $column){
+            $reordered_columns[$key] = $column;
+            if( $key ==  'order_number' ){
+                $reordered_columns['authority_leave'] = __( 'Authority to Leave','theme_slug');
+            }
+        }
+        return $reordered_columns;
+    }
+    
+    // Adding the data for the additional column (example)
+    add_action( 'manage_shop_order_posts_custom_column' , 'custom_orders_list_column_content', 10, 2 );
+    function custom_orders_list_column_content( $column, $post_id )
+    {
+        if( 'authority_leave' == $column )
+        {
+    
+            $authority_leave = get_post_meta( $post_id, '_fah_signature_required', true );
+    
+            if($authority_leave == 'yes'){
+                echo 'YES';
+            }elseif($authority_leave == 'no'){
+                echo "ATL";
+            }else{
+                echo "N/A";
+            }
+    
+        }
+    }
+    
+    /*ADD PRODUCT CATEGORY FILTER*/
+    add_action('restrict_manage_posts', 'product_tags_sorting');
+    function product_tags_sorting() {
+        global $typenow;
+    
+        $taxonomy  = 'product_tag';
+    
+        if ( $typenow == 'product' ) {
+    
+    
+            $selected      = isset($_GET[$taxonomy]) ? $_GET[$taxonomy] : '';
+            $info_taxonomy = get_taxonomy($taxonomy);
+    
+            wp_dropdown_categories(array(
+                'show_option_all' => __("Show all {$info_taxonomy->label}"),
+                'taxonomy'        => $taxonomy,
+                'name'            => $taxonomy,
+                'orderby'         => 'name',
+                'selected'        => $selected,
+                'show_count'      => true,
+                'hide_empty'      => true,
+            ));
+        };
+    }
+    
+    add_action('parse_query', 'product_tags_sorting_query');
+    function product_tags_sorting_query($query) {
+        global $pagenow;
+    
+        $taxonomy  = 'product_tag';
+    
+        $q_vars    = &$query->query_vars;
+        if ( $pagenow == 'edit.php' && isset($q_vars['post_type']) && $q_vars['post_type'] == 'product' && isset($q_vars[$taxonomy]) && is_numeric($q_vars[$taxonomy]) && $q_vars[$taxonomy] != 0 ) {
+            $term = get_term_by('id', $q_vars[$taxonomy], $taxonomy);
+            $q_vars[$taxonomy] = $term->slug;
+        }
+    }
+    
+    /*ADD ORDER PAYMENT METHOD FILTER*/
+   // Add a custom dropdown for filtering by payment method
+    function ts_add_payment_method_filter() {
+        global $typenow, $order;
+        
+        if ('shop_order' === $typenow) {
+            $payment_methods = array(
+                'bacs' => __('BACS', 'woocommerce'),
+                'cod'  => __('Cash on Delivery', 'woocommerce'),
+                'cheque'  => __('Cheque', 'woocommerce'),
+                // Add more payment methods as needed
+            );
+            $wc_gateways      = new WC_Payment_Gateways();
+            $payment_methods = $wc_gateways->payment_gateways();
+           // $payment_methods = WC()->payment_gateways->get_available_payment_gateways();
+            
+            echo '<select name="payment_method_filter">';
+            echo '<option value="">Filter by Payment Method</option>';
+            
+            foreach ($payment_methods as $method => $label) {
+                echo '<option value="' . $method . '" '.(($_GET['payment_method_filter'] == $method)?'selected':'').'>' . $label->get_title() . '</option>';
+            }
+            
+            echo '</select>';
+        }
+    }
+    add_action('restrict_manage_posts', 'ts_add_payment_method_filter');
+    // Filter orders based on the selected payment method
+    function ts_filter_orders_by_payment_method($query) {
+        global $pagenow;
+        
+        if ('edit.php' === $pagenow && isset($_GET['payment_method_filter']) && !empty($_GET['payment_method_filter'])) {
+            $query->query_vars['meta_key'] = '_payment_method';
+            $query->query_vars['meta_value'] = sanitize_text_field($_GET['payment_method_filter']);
+        }
+    }
+    add_filter('parse_query', 'ts_filter_orders_by_payment_method');
+    /*ADD COLUMN TO ORDER LIST*/
+    add_filter( 'manage_edit-product_columns', 'custom_product_column',20);
+    function custom_product_column($columns)
+    {
+        $columns['est_date_arrival'] = esc_html__( 'Est. Arrival Date', 'woocommerce' );
+        $columns['best_before_date'] = esc_html__( 'BBD', 'woocommerce' );
+        $columns['wholesale_min_qty'] =  esc_html__( 'Wholesale Min Qty', 'woocommerce' );
+        $columns['wholesale_qty_step'] = esc_html__( 'Wholesale Qty Step', 'woocommerce' );
+        return $columns;
+    }
+    
+    // Adding the data for the additional column (example)
+    add_action( 'manage_product_posts_custom_column' , 'custom_product_list_column_content', 10, 2 );
+    function custom_product_list_column_content( $column, $post_id )
+    {
+        if( 'est_date_arrival' == $column )
+        {
+    
+            $est_date_arrival = get_post_meta( $post_id, '_estimate_availability_date', true );
+    
+            if(!empty($est_date_arrival))
+                echo $est_date_arrival;
+    
+        }else if('best_before_date' == $column ){
+            global $wpdb;
+            $id = $post_id;
+            $args = array(
+                'post_type'     => 'product_variation',
+                'post_status'   => array( 'private', 'publish' ),
+                'numberposts'   => 1,
+                'orderby'       => 'menu_order',
+                'order'         => 'asc',
+                'post_parent'   => $id // get parent post-ID
+            );
+            $variations = get_posts( $args );
+            foreach($variations as $variation){
+                $var_id = get_post_meta($variation->ID,'wsvi_group_id', true);
+            }
+                
+            if(!empty($var_id )){
+                $id = $var_id;
+            }
+            $bbds = $wpdb->get_results('select expiry_date, quantity, batch_date from '.$wpdb->prefix.'webis_pbet where post_id = '.$id." and quantity > 0 order by expiry_date asc ");
+            $pre = '';
+            foreach($bbds as $bbd){
+                echo $pre. date('d/m/Y', strtotime($bbd->expiry_date))." x ".$bbd->quantity;
+                if(!empty($bbd->batch_date)){
+                    echo ' - ETA: '.date('M d, Y', strtotime($bbd->batch_date));
+                }
+                $pre=",<br/> ";
+            }
+        }
+    }
+    
+    // Make custom column sortable
+    add_filter( "manage_edit-product_sortable_columns", 'product_column_meta_field_sortable' );
+    function product_column_meta_field_sortable( $columns )
+    {
+        $columns['best_before_date'] = 'best_before_date';
+        $meta_key = '_estimate_availability_date';
+        return wp_parse_args( array('est_date_arrival' => $meta_key), $columns );
+    }
+    // Make sorting work properly (by numerical values)
+    add_action('pre_get_posts', 'shop_order_column_meta_field_sortable_orderby' );
+    function shop_order_column_meta_field_sortable_orderby( $query ) {
+        global $pagenow;
+    
+        if ( 'edit.php' === $pagenow && isset($_GET['post_type']) && 'product' === $_GET['post_type']  && $_GET['orderby'] == '_estimate_availability_date' ){
+    
+            $orderby  = $query->get( 'orderby');
+            $meta_key = '_estimate_availability_date';
+
+            $query->set('meta_key', $meta_key);
+            $query->set('orderby', 'meta_value');
+
+        }else if ( 'edit.php' === $pagenow && isset($_GET['post_type']) && 'product' === $_GET['post_type'] && $_GET['orderby'] == 'best_before_date'){
+            add_action( 'posts_join', 'add_post_join_bbd' );
+            add_filter( 'posts_orderby', 'orderby_bbd_table', 10, 2 );
+            add_filter( 'posts_where', 'where_bbd_table' );
+        }
+    }
+    
+    function add_post_join_bbd($join){
+        global $wpdb;
+            
+        $join .= " left join {$wpdb->prefix}webis_pbet exp_dates on {$wpdb->prefix}posts.id = exp_dates.post_id ";
+
+        return $join;
+    }
+    
+    function orderby_bbd_table( $orderby, $wp_query ) {
+        $comma   = "";
+        if ( $orderby ) {
+            $comma = ", ";
+        }
+        $orderby = "exp_dates.expiry_date ". $_GET['order'] ." " . $comma . $orderby;
+
+        return $orderby;
+    }
+    
+    function where_bbd_table( $where ) {
+
+        $where .= " and (exp_dates.expiry_date is not null and exp_dates.quantity != 0 )";
+        
+        return $where;
+    }
+    
+    // Add a new custom column to admin order list
+    add_filter( 'manage_edit-shop_order_columns', 'add_payment_shop_order_column',11);
+    function add_payment_shop_order_column($columns) {
+        $reordered_columns = array();
+    
+        foreach( $columns as $key => $column){
+            $reordered_columns[$key] = $column;
+            if( $key ==  'order_number' ){
+                $reordered_columns['payment_method'] = __( 'Payment','Woocommerce');
+            }
+        }
+        return $reordered_columns;
+    }
+    
+    // The data of the new custom column in admin order list
+    add_action( 'manage_shop_order_posts_custom_column' , 'orders_list_column_payment_title', 10, 2 );
+    function orders_list_column_payment_title( $column, $post_id ){
+        if( 'payment_method' === $column ){
+            $payment_title = get_post_meta( $post_id, '_payment_method_title', true );
+            if( ! empty($payment_title) )
+                echo $payment_title;
+        }
+    }
+    
+    //ADD VISIBILITY FILTER
+    add_filter('woocommerce_product_filters', 'skidz_filter_by_catalog_visibility_dashboard_products');
+
+    function skidz_filter_by_catalog_visibility_dashboard_products($output)
+    {
+      $selected_visible = isset($_GET['catalog_visibility']) && $_GET['catalog_visibility'] === 'visible' ? 'selected' : '';
+      $selected_hidden = isset($_GET['catalog_visibility']) && $_GET['catalog_visibility'] === 'hidden' ? 'selected' : '';
+      $selected_catalog = isset($_GET['catalog_visibility']) && $_GET['catalog_visibility'] === 'catalog' ? 'selected' : '';
+      $selected_search = isset($_GET['catalog_visibility']) && $_GET['catalog_visibility'] === 'search' ? 'selected' : '';
+    
+      $output .= '
+        <select name="catalog_visibility">
+          <option value="">' . __('Filter by', 'woocommerce') . ' ' . __('Visibility', 'woocommerce') . '</option>
+          <option value="visible" ' . $selected_visible . '>' . __('Shop and search results', 'woocommerce') . '</option>
+          <option value="catalog" ' . $selected_catalog . '>' . __('Shop only', 'woocommerce') . '</option>
+          <option value="search" ' . $selected_search . '>' . __('Search results only', 'woocommerce') . '</option>
+          <option value="hidden" ' . $selected_hidden . '>' . __('Hidden', 'woocommerce') . '</option>
+        </select>';
+        
+        /*FEATURED PRODUCT FILTER*/
+        $output .= "<select name='featured_status' id='dropdown_featured_status'>";
+        $output .= '<option value="">'.__( 'Show All Featured Statuses', 'woocommerce' ).'</option>';
+
+        $output .="<option value='featured' ";
+        if ( isset( $_GET['featured_status'] ) ) $output .= selected('featured', $_GET['featured_status'], false);
+        $output .=">".__( 'Featured', 'woocommerce' )."</option>";
+
+        $output .="<option value='normal' ";
+        if ( isset( $_GET['featured_status'] ) ) $output .= selected('normal', $_GET['featured_status'], false);
+        $output .=">".__( 'Not Featured', 'woocommerce' )."</option>";
+
+        $output .="</select>";
+        
+        /*STOCK QUANTITY*/
+        $output .="<input name='quantity_filter' type='number' placeholder='<= quantity' value='". $_GET['quantity_filter'] ."' />";
+        
+        /*STOCK QUANTITY*/
+        $output .="<select name='preorder_filter' >";
+        $output .="<option value='' >".__( 'Filter by Pre-order', 'woocommerce' );
+        $output .="<option value='preorder' ".__( 'Pre-order', 'woocommerce' );
+        if ( isset( $_GET['preorder_filter'] ) ) $output .= selected('preorder', $_GET['preorder_filter'], false);
+        $output .=">".__( 'Pre-order', 'woocommerce' )."</option>";
+        $output .="</select>";
+    
+      return $output;
+    }
+    
+    add_filter('parse_query', 'skidz_catalog_visibility_filter');
+    
+    function skidz_catalog_visibility_filter($query)
+    {
+      global $pagenow;
+      $type = 'product';
+    
+      if (isset($_GET['post_type'])) {
+        $type = $_GET['post_type'];
+      }
+    
+      if ('product' == $type && is_admin() && $pagenow == 'edit.php' && isset($_GET['catalog_visibility']) && $_GET['catalog_visibility'] != '') {
+        $catalog_visibility = $_GET['catalog_visibility'];
+        $additional_query = array();
+    
+        if ($catalog_visibility === 'hidden') {
+          $additional_query = array(
+            'relation' => 'AND',
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-search'),
+            ),
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-catalog'),
+            ),
+          );
+        } else if ($catalog_visibility === 'visible') {
+          $additional_query = array(
+            'taxonomy' => 'product_visibility',
+            'field'    => 'slug',
+            'terms'    =>  array('exclude-from-search', 'exclude-from-catalog'),
+            'operator' =>  'NOT IN',
+          );
+        } else if ($catalog_visibility === 'catalog') {
+          $additional_query = array(
+            'relation' => 'AND',
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-search'),
+              'operator' =>  'IN',
+            ),
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-catalog'),
+              'operator' =>  'NOT IN',
+            ),
+          );
+        } else if ($catalog_visibility === 'search') {
+          $additional_query = array(
+            'relation' => 'AND',
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-search'),
+              'operator' =>  'NOT IN',
+            ),
+            array(
+              'taxonomy' => 'product_visibility',
+              'field'    => 'slug',
+              'terms'    => array('exclude-from-catalog'),
+              'operator' =>  'IN',
+            ),
+          );
+        }
+    
+        $query->tax_query->queries[] = $additional_query;
+        $query->query_vars['tax_query'] = $query->tax_query->queries;
+      }
+    }
+}
+
+add_filter( 'woocommerce_form_field_args', 'my_wwlc_set_country');
+function my_wwlc_set_country($args){
+    /*
+    // Set the country list
+    if($args['id'] == 'wwlc_state'){
+        $args['type'] = 'select';
+        $args['options'] = [
+            'ACT' => 'Australia Capital Territory',
+            'NSW' => 'New South Whales',
+            'NT' => 'Northern Territory',
+            'QLD' => 'Queensland',
+            'SA' => 'South Australia',
+            'TAS' => 'Tasmania',
+            'VIC' => 'Victoria',
+            'WA' => 'Western Australia'
+        ];
+    }
+    */
+    if($args['id'] == 'wwlc_country'){
+        $args['options'] = array(
+            '' => 'Select Country',
+            'AU' => 'Australia',
+        );
+    }
+    
+    // Return the modified list
+    return $args;
+}
+
+add_action( 'wp_footer' , function() { 
+    global $post;
+    if( ( isset( $post->post_content ) && has_shortcode( $post->post_content , 'wwlc_registration_form' ) ) ) { ?>
+        <script type="text/javascript">
+            jQuery(document).ready(function(){
+                jQuery("#wwlc_country").trigger("change");
+            });
+        </script>
+    <?php }
+}, 100 );
+
+//CLEAR CART FIX
+function careless_empty_cart_on_successful_order($order_id) {
+    if(!empty(WC()->cart))
+        WC()->cart->empty_cart();
+}
+add_action( 'woocommerce_thankyou', 'careless_empty_cart_on_successful_order',10, 1 );
+//add_action( 'woocommerce_checkout_order_processed', 'order_received_empty_cart_action', 10, 1 );
+//add_action( 'woocommerce_payment_complete', 'order_received_empty_cart_action', 10, 1 );
+
+/*FILTER BY FEATURED PRODUCT*/
+function fah_featured_filter_query( $query ) {
+    global $typenow;
+
+    if ( $typenow == 'product' ) {
+
+        // Subtypes
+        if ( ! empty( $_GET['featured_status'] ) ) {
+            if ( $_GET['featured_status'] == 'featured' ) {
+                $query->query_vars['tax_query'][] = array(
+                    'taxonomy' => 'product_visibility',
+                    'field'    => 'slug',
+                    'terms'    => 'featured',
+                );
+            } elseif ( $_GET['featured_status'] == 'normal' ) {
+                $query->query_vars['tax_query'][] = array(
+                    'taxonomy' => 'product_visibility',
+                    'field'    => 'slug',
+                    'terms'    => 'featured',
+                    'operator' => 'NOT IN',
+                );
+            }
+        }
+        
+        if( !empty($_GET['quantity_filter'])){
+            $meta_query[] = array(
+                'key'     => '_stock',
+                'value'   => $_GET['quantity_filter'],
+                'compare' => '<=',
+                'type'    => 'NUMERIC',
+              );
+            $query->set( 'meta_query', $meta_query);
+        }
+        
+        if( !empty($_GET['preorder_filter'])){
+            $meta_query[] = array(
+                'key'     => '_ywpo_preorder',
+                'value'   => 'yes',
+                'compare' => '=',
+              );
+            $query->set( 'meta_query', $meta_query);
+        }
+
+    }
+
+}
+add_filter( 'parse_query', 'fah_featured_filter_query' );
+
+/*SEND EMAIL TO CUSTOMER FOR CANCELLED ORDER*/
+add_action('woocommerce_order_status_changed', 'send_custom_email_notifications', 10, 4 );
+function send_custom_email_notifications( $order_id, $old_status, $new_status, $order ){
+    $wc_emails = WC()->mailer()->get_emails(); // Get all WC_emails objects instances
+    if ( $new_status == 'cancelled' ){
+        $customer_email = $order->get_billing_email(); // The customer email
+        // change the recipient of this instance
+        $old_emails = $wc_emails['WC_Email_Cancelled_Order']->recipient;
+        $wc_emails['WC_Email_Cancelled_Order']->recipient = $customer_email;
+        // Sending the email from this instance
+        $wc_emails['WC_Email_Cancelled_Order']->trigger( $order_id );
+        $wc_emails['WC_Email_Cancelled_Order']->recipient = $old_emails;
+    }else if($new_status == 'on-hold-to-pay'){
+        $wc_emails['WC_Email_Customer_On_Hold_Order']->enabled = "yes";
+        $wc_emails['WC_Email_Customer_On_Hold_Order']->trigger( $order_id );
+        $wc_emails['WC_Email_Customer_On_Hold_Order']->enabled = "no";
+    }else if($new_status == 'completed-to-pay' && $old_status != 'completed'){
+        $wc_emails['WC_Email_Customer_Completed_Order']->enabled = "yes";
+        $wc_emails['WC_Email_Customer_Completed_Order']->trigger( $order_id );
+        $wc_emails['WC_Email_Customer_Completed_Order']->enabled = "no";
+    }else if($new_status == 'completed' && $old_status != 'completed-to-pay'){
+        $wc_emails['WC_Email_Customer_Completed_Order']->enabled = "yes";
+        $wc_emails['WC_Email_Customer_Completed_Order']->trigger( $order_id );
+        $wc_emails['WC_Email_Customer_Completed_Order']->enabled = "no";
+    }
+    
+    return true;
+}
+
+//EMAIL PROCESSING TO ONHOLD
+/*add_action( 'woocommerce_order_status_processing_to_on-hold', 'enable_processing_to_on_hold_notification', 10, 2 );
+function enable_processing_to_on_hold_notification( $order_id, $order ){
+    // Getting all WC_emails array objects
+    $mailer = WC()->mailer()->get_emails();
+
+    // Send the "On Hold" notification
+    $mailer['WC_Email_Customer_On_Hold_Order']->trigger( $order_id );
+}*/
+
+/*NEW TAB FOR MY ACCOUNT*/
+function fah_purchased_products_endpoint() {
+    add_rewrite_endpoint( 'purchased-products', EP_ROOT | EP_PAGES );
+    flush_rewrite_rules();
+}
+  
+add_action( 'init', 'fah_purchased_products_endpoint' );
+// 2. Add new query var
+  
+function fah_purchased_products_query_vars( $vars ) {
+    $vars[] = 'purchased-products';
+    return $vars;
+}
+  
+add_filter( 'query_vars', 'fah_purchased_products_query_vars', 0 );
+// 3. Insert the new endpoint into the My Account menu
+  
+function fah_add_purchased_products_link_my_account( $items ) {
+    $items['purchased-products'] = 'Previously Purchased Products';
+    return $items;
+}
+  
+add_filter( 'woocommerce_account_menu_items', 'fah_add_purchased_products_link_my_account' );
+
+add_filter( 'woocommerce_get_endpoint_url', 'fah_hook_endpoint', 10, 4 );
+function fah_hook_endpoint( $url, $endpoint, $value, $permalink ){
+ 
+    if( 'purchased-products' === $endpoint ) {
+ 
+        // ok, here is the place for your custom URL, it could be external
+        $url .= '?orderby=stock_status';
+ 
+    }
+    return $url;
+ 
+}
+
+// 4. Add content to the new tab
+  
+function fah_purchased_products_content() {
+    $is_button_enabled = get_option('admin_fah_toggle_expp_button_enabled', false);
+    $Current_user_role = WWP_Wholesale_Roles::getInstance()->getUserWholesaleRole();
+    $isActivePurchasedBtn = !empty($is_button_enabled) && !empty($Current_user_role[0]);
+
+    echo '<div class="fah-handle-purchased-container" style="display: flex; justify-content: space-between; align-items: center;">';
+
+    if($isActivePurchasedBtn){
+        echo '<form method="post" class="fah-purchased-export-csv">
+        <input type="hidden" name="fah_export_purchased_csv" value="1" />
+        <button type="submit" class="button">Export All Products</button>
+    </form>';
+    }else {
+        echo '<div></div>';
+    }
+
+    if($_GET['view-all'] == 1)
+        echo '<div class="fah-purchased-view-btn"><a href="?" style="background-color: #13aff0" class="button">View Per Page</a></div>';
+    else{
+        echo '<div class="fah-purchased-view-btn"><a href="?view-all=1" style="background-color: #13aff0" class="button">View All Products</a></div>';
+    }
+
+    echo '</div>';
+
+    echo do_shortcode( '[my_purchased_products]' );
+}
+add_action( 'woocommerce_account_purchased-products_endpoint', 'fah_purchased_products_content' );
+// Note: add_action must follow 'woocommerce_account_{your-endpoint-slug}_endpoint' format
+
+function fah_commercekit_cgkit_wishlist_content() {
+    echo '<h2>' . esc_html__( 'My wishlist', 'commercegurus-commercekit' ) . '</h2>';
+    echo '<p>' . esc_html__( 'Your wishlist allows you to create personalized collections of products that you want to buy and save them for future reference.', 'commercegurus-commercekit' ) . '</p>';
+    echo do_shortcode( '[commercegurus_wishlist]' );
+}
+remove_action('woocommerce_account_cgkit-wishlist_endpoint', 'commercekit_cgkit_wishlist_content');
+add_action( 'woocommerce_account_cgkit-wishlist_endpoint', 'fah_commercekit_cgkit_wishlist_content' );
+
+function cw_add_postmeta_ordering_args( $args_sort_cw ) {
+ 
+ $cw_orderby_value = isset( $_GET['orderby'] ) ? wc_clean( $_GET['orderby'] ) :
+       apply_filters( 'woocommerce_default_catalog_orderby', get_option( 'woocommerce_default_catalog_orderby' ) );
+ switch( $cw_orderby_value ) {
+   case 'stock_status':
+     $args_sort_cw['orderby'] = 'meta_value';
+     $args_sort_cw['order'] = 'asc';
+     $args_sort_cw['meta_key'] = '_stock_status';
+     break;
+ }
+ 
+ return $args_sort_cw;
+}
+
+add_filter( 'woocommerce_get_catalog_ordering_args', 'cw_add_postmeta_ordering_args' );
+function cw_add_new_postmeta_orderby( $sortby ) {
+    $sortby['stock_status'] = __( 'Sort Stock Status', 'woocommerce' );
+    $sortby['alphabetical_asc'] = __( 'Sort Alphabetically A to Z', 'woocommerce' );
+    $sortby['alphabetical_dsc'] = __( 'Sort Alphabetically Z to A', 'woocommerce' );
+    $sortby['alphabetical_asc_product_end'] = __( 'Sort Alphabetically A to Z (Default)', 'woocommerce' );
+    $sortby['alphabetical_dsc_product_end'] = __( 'Sort Alphabetically Z to A (Default)', 'woocommerce' );
+
+    return $sortby;
+}
+add_filter( 'woocommerce_default_catalog_orderby_options', 'cw_add_new_postmeta_orderby' );
+add_filter( 'woocommerce_catalog_orderby', 'cw_add_new_postmeta_orderby' );
+
+add_shortcode( 'my_purchased_products', 'fah_products_bought_by_curr_user' );
+   
+function fah_products_bought_by_curr_user($returnOnlyId=false) {
+   
+    // GET CURR USER
+    $current_user = wp_get_current_user();
+    if ( 0 == $current_user->ID ) return;
+   
+    // GET USER ORDERS (COMPLETED + PROCESSING)
+    $customer_orders = get_posts( array(
+        'numberposts' => -1,
+        'meta_key'    => '_customer_user',
+        'meta_value'  => $current_user->ID,
+        'post_type'   => wc_get_order_types(),
+        'post_status' => array_keys( wc_get_is_paid_statuses() ),
+    ) );
+   
+    // LOOP THROUGH ORDERS AND GET PRODUCT IDS
+    if ( ! $customer_orders ) return;
+    $product_ids = array();
+    foreach ( $customer_orders as $customer_order ) {
+        $order = wc_get_order( $customer_order->ID );
+        $items = $order->get_items();
+        foreach ( $items as $item ) {
+            $product_id = $item->get_product_id();
+            $product_ids[] = $product_id;
+        }
+    }
+    $product_ids = array_unique( $product_ids );
+    $product_ids_str = implode( ",", $product_ids );
+   
+    $limit = ($_GET['view-all']==1) ? '':15;
+
+    if($returnOnlyId){
+        return $product_ids;
+    }
+    // PASS PRODUCT IDS TO PRODUCTS SHORTCODE
+    return do_shortcode("[products ids='$product_ids_str' paginate='true' orderby='date' columns='3' limit='$limit' orderby='stock_status']");
+   
+}
+
+/* ADD EXTRA FIELD FOR USER NOTE */
+ add_action( 'show_user_profile', 'extra_user_note_fields' );
+ add_action( 'edit_user_profile', 'extra_user_note_fields' );
+ function extra_user_note_fields( $user ) {
+     echo '<h3> Account Notes</h3>
+ 
+     <table class="form-table">
+     <tr>
+         <td>
+             <textarea name="fah_user_note" id="fah_user_note" rows="3" >'.get_the_author_meta( 'fah_user_note', $user->ID ).'</textarea>
+         </td>
+     </tr>
+     </table>
+     <h3> Delivery/Warehouse Notes</h3>
+ 
+     <table class="form-table">
+     <tr>
+         <td>
+             <textarea name="fah_user_delivery_note" id="fah_user_delivery_note" rows="3" >'.get_the_author_meta( 'fah_user_delivery_note', $user->ID ).'</textarea>
+         </td>
+     </tr>
+     </table>
+     ';
+ }
+ 
+ add_action( 'personal_options_update', 'save_user_note' );
+ add_action( 'edit_user_profile_update', 'save_user_note' );
+ function save_user_note( $user_id ) {
+     if ( empty( $_POST['_wpnonce'] ) || ! wp_verify_nonce( $_POST['_wpnonce'], 'update-user_' . $user_id ) ) {
+         return;
+     }
+         
+     if ( !current_user_can( 'edit_user', $user_id ) ) { 
+         return false; 
+     }
+     update_user_meta( $user_id, 'fah_user_note', $_POST['fah_user_note'] );
+     update_user_meta( $user_id, 'fah_user_delivery_note', $_POST['fah_user_delivery_note'] );
+ }
+ 
+function fah_display_user_note_in_admin( $order ){
+    
+     if ( !$order->has_status('completed') && !$order->has_status('cancelled')) {
+        $actions['complete'] = array(
+            'url'    => wp_nonce_url( admin_url( 'admin-ajax.php?action=woocommerce_mark_order_status&status=completed&order_id=' . $order->get_id() ), 'woocommerce-mark-order-status' ),
+            'name'   => __( 'Complete', 'woocommerce' ),
+            'action' => 'complete',
+        );
+        echo '<p class="form-field form-field-wide"><a href="'.wp_nonce_url( admin_url( 'admin-ajax.php?action=woocommerce_mark_order_status&status=completed&order_id=' . $order->get_id() ), 'woocommerce-mark-order-status' ).'" class="button">Set status: Completed</a></p>';
+    }
+    
+    $payment_method = $order->get_payment_method();
+    if($payment_method === 'fah_eft_14d_terms_payments'){
+        $payment_terms = "14 Days";
+    } else if($payment_method === 'fah_eft_30d_terms_payments'){
+        $payment_terms = "30 Days";
+    } else if($payment_method === 'fah_eft_7d_terms_payments'){
+        $payment_terms = "7 Days";
+    } else if($payment_method === 'fah_eft_21d_terms_payments'){
+        $payment_terms = "21 Days";
+    } else{
+        $payment_terms = "";
+    }
+                    
+    $value = date('F d, Y', strtotime($order->get_date_created()." +".$payment_terms." 10 hours"));
+
+    if(!empty($payment_terms)) echo '<br/> <strong>Due Date: </strong><br/>'.$value."<br/>";
+    
+    $note = get_the_author_meta( 'fah_user_note', $order->get_user_id() );
+    if(!empty($note)){
+    echo  '<h4>Account Note</h4><p>'.$note.'</p>';
+    }
+    
+    
+}
+add_action( 'woocommerce_admin_order_data_after_order_details', 'fah_display_user_note_in_admin' );
+
+/* ADMIN ADJUSTMENTS */
+//ORDERS PAGE WEIGHT
+add_filter( 'manage_edit-shop_order_columns', 'woo_order_weight_column' );
+function woo_order_weight_column( $columns ) {
+    $columns['atl'] = __('Authority to leave', 'woocommerce');
+    $columns['authority_leave'] = __( 'Signature Required', 'woocommerce' );
+    $columns['total_weight'] = __( 'Weight', 'woocommerce' );
+    $columns['invoice_due_date'] = __( 'Inv Due Date', 'woocommerce' );
+    $columns['order_notes'] = __( 'Order Notes', 'woocommerce' );
+    $columns['delivery_notes'] = __( 'Delivery/WH Notes', 'woocommerce' );
+    $columns['account_notes'] = __( 'Account Notes', 'woocommerce' );
+    return $columns;
+}
+
+add_action( 'manage_shop_order_posts_custom_column', 'woo_custom_order_weight_column', 2 );
+function woo_custom_order_weight_column( $column ) {
+    global $post, $woocommerce, $the_order;
+
+    if ( empty( $the_order ) || $the_order->id != $post->ID )
+        $the_order = new WC_Order( $post->ID );
+    
+    if ('atl' === $column) {
+        $atl_value = get_post_meta($the_order->get_id(), 'authority_to_leave', true);
+        echo esc_html($atl_value);
+    }
+
+    if ( $column == 'total_weight' ) {
+        $weight = 0;
+        if ( sizeof( $the_order->get_items() ) > 0 ) {
+            foreach( $the_order->get_items() as $item ) {
+                if ( $item['product_id'] > 0 ) {
+                    $_product = $the_order->get_product_from_item( $item );
+                    if ( ! $_product->is_virtual() ) {
+                        $weight += floatval($_product->get_weight()) * $item['qty'];
+                    }
+                }
+            }
+        }
+        if ( $weight > 0 )
+            print $weight . ' ' . esc_attr( get_option('woocommerce_weight_unit' ) );
+        else print 'N/A';
+    }else if('invoice_due_date' == $column){
+        $payment_method = get_post_meta(  $post->ID, '_payment_method', true );
+        if($payment_method === 'fah_14d_terms_payments' || $payment_method == 'fah_eft_14d_terms_payments'){
+            $payment_terms = "14 Days";
+        } else if($payment_method === 'fah_30d_terms_payments' || $payment_method === 'fah_eft_30d_terms_payments'){
+            $payment_terms = "30 Days";
+        } else if($payment_method === 'fah_7d_terms_payments' || $payment_method === 'fah_eft_7d_terms_payments'){
+            $payment_terms = "7 Days";
+        } else if($payment_method === 'fah_21d_terms_payments' || $payment_method === 'fah_eft_21d_terms_payments'){
+            $payment_terms = "21 Days";
+        }else{
+            $payment_terms = '';
+        }
+            
+        if($payment_terms != '')
+            echo date('F d, Y', strtotime($the_order->order_date." +".$payment_terms.""));
+    }else if('order_notes' == $column){
+        echo  $the_order->get_customer_note();
+    }else if('delivery_notes' == $column){
+        echo  get_the_author_meta( 'fah_user_delivery_note', $the_order->get_user_id() );
+    }else if('account_notes' == $column){
+        echo get_the_author_meta( 'fah_user_note', $the_order->get_user_id() );
+    }
+}
+
+/**
+ * @snippet       View Thank You Page @ Edit Order Admin
+ * @how-to        Get CustomizeWoo.com FREE
+ * @author        Rodolfo Melogli
+ * @compatible    WooCommerce 6
+ * @donate $9     https://businessbloomer.com/bloomer-armada/
+ */
+/*
+add_filter( 'woocommerce_order_actions', 'bbloomer_show_thank_you_page_order_admin_actions', 9999, 2 );
+ 
+function bbloomer_show_thank_you_page_order_admin_actions( $actions, $order ) {
+   if ( $order->has_status( wc_get_is_paid_statuses() ) ) {
+      $actions['view_thankyou'] = 'Display thank you page';
+   }
+   return $actions;
+}
+ 
+add_action( 'woocommerce_order_action_view_thankyou', 'bbloomer_redirect_thank_you_page_order_admin_actions' );
+ 
+function bbloomer_redirect_thank_you_page_order_admin_actions( $order ) {
+   $url = $order->get_checkout_order_received_url();
+   add_filter( 'redirect_post_location', function() use ( $url ) {
+      return $url;
+   });
+}*/
+
+add_action( 'woocommerce_bacs_process_payment_order_status', 'fah_set_to_onhold_waiting_payment',10,2 );
+
+function fah_set_to_onhold_waiting_payment( $status, $order ) {
+    /*$mailer = WC()->mailer()->get_emails();
+    //Send the "On Hold" notification
+    $mailer['FAH_Processing_Pending']->trigger( $order->id );*/
+    wc_reduce_stock_levels( $order->id );
+    if(isset($_POST[ $order->id.'-admin-note']) && trim($_POST[ $order->id.'-admin-note'])!=''){
+        $order->add_order_note(esc_html($_POST[ $order->id.'-admin-note']),1);
+    }
+
+    return  $status = 'wc-processing-pend' ;
+}
+//EMPTY CART
+// function woosuite_add_custom_cart_action_button() {
+//     // Output your custom action button HTML here
+//     echo do_shortcode( '[prowc_empty_cart_button]' );
+// }
+// add_action( 'woocommerce_cart_actions', 'woosuite_add_custom_cart_action_button' );
+
+//ADD SIGNATURE FEE ON CHECKOUT CHECKBOX
+// Display the custom checkbow field in checkout
+//add_action( 'woocommerce_review_order_before_order_total', 'fee_installment_checkbox_field', 1 );
+function fee_installment_checkbox_field(){
+    $chosen_methods = WC()->session->get( 'chosen_shipping_methods' );
+    $chosen_shipping = $chosen_methods[0];
+    
+    if ( stripos($chosen_shipping, 'click_and_collect') === FALSE && stripos($chosen_shipping, 'refrigerated') === FALSE) {
+        WC()->session->set('signature_required_fee', (WC()->session->get('signature_required_fee') ? true : false) );
+        echo '<tr class="packing-select"><th>';
+        if(WC()->cart->get_cart_shipping_total() == "Free!"){
+            $fee_amount  = 0;
+        }
+        elseif ( stripos($chosen_shipping, 'free') === FALSE ) {
+            $fee_amount  = 7;
+        }else{
+            $fee_amount  = 0;
+        }
+        woocommerce_form_field( 'signature_required_fee', array(
+            'type'          => 'checkbox',
+            'class'         => array('installment-fee form-row-wide'),
+            'label'         => __('Signature Required (+$'.$fee_amount.')'),
+            'placeholder'   => __(''),
+        ), WC()->session->get('signature_required_fee') ? '1' : '' );
+        echo '</th><td>';
+    }else{
+        WC()->session->set('signature_required_fee', false );
+
+        add_action( 'woocommerce_cart_calculate_fees', 'set_signature_required_fee' );
+    }
+}
+
+// jQuery - Ajax script
+add_action( 'wp_footer', 'checkout_fee_script' );
+function checkout_fee_script() {
+    // Only on Checkout
+    if( is_checkout() && ! is_wc_endpoint_url() ) :
+
+    if( WC()->session->__isset('signature_required_fee') )
+        WC()->session->__unset('signature_required_fee')
+    ?>
+    <script type="text/javascript">
+    jQuery( function($){
+        if (typeof wc_checkout_params === 'undefined')
+            return false;
+
+        $('form.checkout').on('change', 'input[name=signature_required_fee]', function(){
+            var fee = $(this).prop('checked') === true ? '1' : '';
+
+            $.ajax({
+                type: 'POST',
+                url: wc_checkout_params.ajax_url,
+                data: {
+                    'action': 'signature_required_fee',
+                    'signature_required_fee': fee,
+                },
+                success: function (result) {
+                    $('body').trigger('update_checkout');
+                },
+            });
+        });
+    });
+    </script>
+    <?php
+    endif;
+}
+
+// Get Ajax request and saving to WC session
+add_action( 'wp_ajax_signature_required_fee', 'get_signature_required_fee' );
+add_action( 'wp_ajax_nopriv_signature_required_fee', 'get_signature_required_fee' );
+function get_signature_required_fee() {
+    if ( isset($_POST['signature_required_fee']) ) {
+        WC()->session->set('signature_required_fee', ($_POST['signature_required_fee'] ? true : false) );
+    }
+    die();
+}
+
+
+// Add a custom calculated fee conditionally
+//add_action( 'woocommerce_cart_calculate_fees', 'set_signature_required_fee' );
+function set_signature_required_fee( $cart ){
+    if ( is_admin() && ! defined('DOING_AJAX') || ! is_checkout() )
+        return;
+
+    if ( did_action('woocommerce_cart_calculate_fees') >= 2 )
+        return;
+
+    if ( 1 == WC()->session->get('signature_required_fee') ) {
+        $chosen_methods = WC()->session->get( 'chosen_shipping_methods' );
+        $chosen_shipping = $chosen_methods[0];
+        $fee_label   = 'Signature Required Fee';
+        if(WC()->cart->get_cart_shipping_total() == "Free!"){
+            $fee_amount  = 0;
+        }
+        elseif ( stripos($chosen_shipping, 'free') === FALSE) {
+            $fee_amount  = 7;
+        }else{
+            $fee_amount  = 0;
+        }
+            
+        WC()->cart->add_fee( $fee_label, $fee_amount );
+    }
+//  else{
+//         WC()->cart->add_fee( 'Authority to Leave', 0 );
+//     }
+}
+
+add_filter( 'woocommerce_form_field' , 'remove_optional_txt_from_installment_checkbox', 10, 4 );
+function remove_optional_txt_from_installment_checkbox( $field, $key, $args, $value ) {
+    // Only on checkout page for Order notes field
+    if( 'signature_required_fee' === $key && is_checkout() ) {
+        $optional = '&nbsp;<span class="optional">(' . esc_html__( 'optional', 'woocommerce' ) . ')</span>';
+        $field = str_replace( $optional, '', $field );
+    }
+    return $field;
+}
+
+/*Honeypot code*/
+
+add_action( 'woocommerce_after_checkout_billing_form', 'bbloomer_checkout_honeypot', 9999 );
+  
+function bbloomer_checkout_honeypot() {
+   echo '<p style="opacity: 0; position: absolute; top: 0; left: 0; height: 0; width: 0; z-index: -1;"><input type="text" name="xxjfah_3hnja" value="" tabindex="-1" autocomplete="off"></p>';
+}
+ 
+add_action( 'woocommerce_after_checkout_validation', 'bbloomer_checkout_honeypot_validate' );
+   
+function bbloomer_checkout_honeypot_validate( $posted ) {
+   if ( isset( $_POST['xxjfah_3hnja'] ) && ! empty( $_POST['xxjfah_3hnja'] ) ) {
+      wc_add_notice( 'Sorry, our system flagged this checkout attempt as spam. Please try again', 'error' );
+   }
+}
+
+//REMOVE PAYMENT ON MY ACCOUNT PAGE
+add_filter('woocommerce_my_account_my_orders_actions', 'remove_myaccount_orders_cancel_button', 10, 2);
+function remove_myaccount_orders_cancel_button( $actions, $order ){
+    unset($actions['cancel']);
+    unset($actions['pay']);
+
+    return $actions;
+}
+
+//PIMWICK FIX
+function custom_pwgc_mpdf_temp_dir( $temp_dir ) {
+    $temp_dir = '/home/france/temp';
+    return $temp_dir;
+}
+add_filter( 'pwgc_mpdf_temp_dir', 'custom_pwgc_mpdf_temp_dir' );
+
+add_filter( 'wwof_filter_product_item_quantity', function($quantity_field){
+$quantity_field = str_replace('<div class="quantity">', '<div class="quantity"><button type="button" class="quantity-down wwof-minus">-</button>', $quantity_field);
+$quantity_field = str_replace('</div>', '<button type="button" class="quantity-up wwof-plus">+</button></div>', $quantity_field);
+return $quantity_field;
+}, 99, 2 );
+
+add_action( 'wp_footer', function() {
+global $post;
+if( isset( $post->post_content ) && has_shortcode( $post->post_content , 'wwof_product_listing' ) ) { ?>
+<script>
+(function($) {
+
+$(document).ready(function(){
+
+function wwof_refresh_quantity_increments(){
+$( 'div.quantity:not(.buttons_added), td.quantity:not(.buttons_added)' ).addClass( 'buttons_added' ).append( '' ).prepend( '' );
+}
+$( document ).on( 'updated_wc_div', function() {
+wwof_refresh_quantity_increments();
+} );
+$( document ).on( 'click', '.wwof-plus, .wwof-minus', function() {
+
+// Get values
+var qty = $( this ).closest( '.quantity' ).find( '.qty'),
+currentVal = parseFloat( qty.val() ),
+max = parseFloat( qty.attr( 'max' ) ),
+min = parseFloat( qty.attr( 'min' ) ),
+step = qty.attr( 'step' );
+
+// Format values
+if ( ! currentVal || currentVal === "" || currentVal === "NaN" ) currentVal = 0;
+if ( max === "" || max === "NaN" ) max = "";
+if ( min === "" || min === "NaN" ) min = 0;
+if ( step === "any" || step === "" || step === undefined || parseFloat( step ) === "NaN" ) step = 1;
+    // Change the value
+
+    if ( $( this ).is( ".wwof-plus" ) ) {
+        if ( max && ( currentVal >= max ) ) {
+            qty.val( max );
+        } else {
+            qty.val( currentVal + parseFloat( step ) );
+        }
+    } else {
+        if ( min && ( currentVal <= min ) ) {
+            qty.val( min );
+        } else if ( currentVal > 0 ) {
+            qty.val( currentVal - parseFloat( step ) );
+        }
+    }
+    // Trigger change event
+     qty.trigger( "change" );
+});
+wwof_refresh_quantity_increments();
+});
+})(jQuery);
+</script>
+<?php
+}
+} );
+
+//PHONE ORDER BUG FIX
+add_filter( 'wpo_skip_add_to_cart_item', function($skip , $item){
+    return isset($item['acfw_add_product']);
+}, 10, 2);
+
+//PASSWORD PROTECT MESSAGE
+add_filter( 'the_password_form', 'fah_custom_password_form' );
+function fah_custom_password_form( $output ) {
+    
+    $output = str_replace(
+        'This content is password protected. To view it please enter your password below:',
+        'This page is protected. Contact our office at tel: <a href="tel:+61383397438">+613 8339 7438</a> to request access.',
+        $output
+    );
+
+    return $output;
+}
+
+//ADDS SHIPTO NAME TO MY-ACCOUNT ORDER
+function sv_wc_add_my_account_orders_column( $columns ) {
+    $user = wp_get_current_user();
+    if ( in_array( 'Canal', (array) $user->roles ) ) {
+        $new_columns = array();
+        foreach ( $columns as $key => $name ) {
+            $new_columns[ $key ] = $name;
+            // add ship-to after order status column
+            if ( 'order-status' === $key ) {
+                $new_columns['order-ship-to'] = __( 'Ship to', 'textdomain' );
+            }
+        }
+        return $new_columns;
+    }
+    
+    return $columns;
+    
+}
+add_filter( 'woocommerce_my_account_my_orders_columns', 'sv_wc_add_my_account_orders_column' );
+
+
+/**
+ * Adds data to the custom "ship to" column in "My Account > Orders".
+ *
+ * @param \WC_Order $order the order object for the row
+ */
+function sv_wc_my_orders_ship_to_column( $order ) {
+    $formatted_shipping = $order->get_shipping_first_name().' '.$order->get_shipping_last_name();
+    echo ! empty( $formatted_shipping ) ? $formatted_shipping : '&ndash;';
+}
+add_action( 'woocommerce_my_account_my_orders_column_order-ship-to', 'sv_wc_my_orders_ship_to_column' );
+
+
+function load_font_awesome() {
+    wp_enqueue_style( 'font-awesome-6', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css' );
+}
+add_action( 'wp_enqueue_scripts', 'load_font_awesome' );
+
+
+// Add "Return to Shop" button in WooCommerce cart
+add_action( 'woocommerce_cart_actions', 'add_return_to_shop_button' );
+function add_return_to_shop_button() {
+    $shop_page_url = wc_get_page_permalink( 'shop' ); // Get the shop page URL
+    ?>
+    <div class="return-to-shop-wrapper">
+        <a href="<?php echo esc_url( $shop_page_url ); ?>" class="button wc-backward">
+            <?php esc_html_e( 'Return to Shop', 'woocommerce' ); ?>
+        </a>
+    </div>
+    <?php
+}
+
+function custom_enable_place_order_button() {
+    if (is_checkout()) {
+        ?>
+        <script type="text/javascript">
+        jQuery(function($) {
+            // Enable the Place Order button when a payment method is selected
+            $('form.checkout').on('change', 'input[name="payment_method"]', function() {
+                if ($('input[name="payment_method"]:checked').length) {
+                    $('#place_order').removeAttr('disabled');
+                }
+            });
+        });
+        </script>
+        <?php
+    }
+}
+add_action('wp_footer', 'custom_enable_place_order_button');
+
+
+//WP REST API for copying value to other custom field.
+function register_import_unit_multiplier_rest_route() {
+    register_rest_route('custom-api/v1', '/import-unit-multiplier', array(
+        'methods'  => 'POST',
+        'callback' => 'handle_import_unit_multiplier_request',
+        // 'permission_callback' => function() {
+        //     return current_user_can('manage_options'); // Permission check, adjust as needed
+        // },
+    ));
+}
+
+add_action('rest_api_init', 'register_import_unit_multiplier_rest_route');
+function handle_import_unit_multiplier_request(WP_REST_Request $request) {
+    // Get the Google Sheets URL and batch params
+    $google_sheet_url = $request->get_param('google_sheet_url');
+    $batch_size = $request->get_param('batch_size') ?: 100; // Default batch size
+    $start_row = $request->get_param('start_row') ?: 0;
+
+    // Get the custom field names from request params (array)
+    $custom_fields = $request->get_param('custom_fields');
+
+    if (empty($custom_fields) || !is_array($custom_fields)) {
+        return new WP_Error('invalid_custom_fields', 'Custom fields must be an array', array('status' => 400));
+    }
+
+    // Fetch the CSV data from Google Sheets
+    $response = wp_remote_get($google_sheet_url);
+
+    if (is_wp_error($response)) {
+        return new WP_Error('fetch_error', 'Error fetching CSV data from Google Sheets', array('status' => 500));
+    }
+
+    $csv_content = wp_remote_retrieve_body($response);
+
+    if (empty($csv_content)) {
+        return new WP_Error('empty_csv', 'The CSV content is empty', array('status' => 400));
+    }
+
+    // Parse and import the CSV content in batches
+    $executed_count = import_unit_multiplier_from_csv_content($csv_content, $custom_fields, $start_row, $batch_size);
+
+    return rest_ensure_response(array(
+        'message' => 'Batch import completed successfully.',
+        'executed_count' => $executed_count
+    ));
+}
+
+function import_unit_multiplier_from_csv_content($csv_content, $custom_fields, $start_row = 0, $batch_size = 100) {
+    $rows = str_getcsv($csv_content, "\n"); // Split by new line
+    $header = str_getcsv(array_shift($rows), ","); // Extract header row
+
+    $total_rows = count($rows);
+    $rows = array_slice($rows, $start_row, $batch_size); // Get only the current batch
+    $executed_count = 0;
+
+    foreach ($rows as $row) {
+        $data = str_getcsv($row, ",");
+
+        $product_id = intval($data[0]);
+
+        // Ensure we have a valid product ID and custom fields
+        if ($product_id > 0) {
+            foreach ($custom_fields as $index => $custom_field) {
+                if (isset($data[1])) {
+                    $value = floatval($data[1]);
+                    update_post_meta($product_id, $custom_field, $value);
+                }
+            }
+            $executed_count++;
+        }
+    }
+
+    return $executed_count;
+}
+
+/*** filtering posts throws critical error due to memory issue. Below is the temporary fix applied ***/
+add_action('pre_get_posts', 'custom_woocommerce_product_filter');
+
+function custom_woocommerce_product_filter($query) 
+{
+    if (is_admin() && $query->is_main_query() && isset($_GET['filter_action']) && 
+        in_array($query->get('post_type'), ['product', 'shop_coupon','shop_order'])) 
+    {
+        // Your custom filter code here
+        unset($_GET['filter_action']);
+    }
+}
+
+add_action('admin_enqueue_scripts', function() {
+    // Check if the current user is NOT the user with ID 1
+    if (get_current_user_id() !== 21316) {
+        echo '<style>
+            /* Replace #YOUR-TAB-ID with the actual ID or class of the tab you want to hide */
+            li#toplevel_page_nitropack,li#wp-admin-bar-nitropack-top-menu {
+                display: none !important;
+            }
+        </style>';
+    }
+});
+
+function enqueue_recaptcha_v3_script() {
+    if (is_checkout()) {
+        wp_enqueue_script('google-recaptcha', 'https://www.google.com/recaptcha/api.js?render=6LceW4oqAAAAAOApgLvicyY67iZcig4vhDsZwKGU');
+        wp_add_inline_script('google-recaptcha', '
+            grecaptcha.ready(function() {
+              function executeRecaptcha() {
+                grecaptcha.execute("6LceW4oqAAAAAOApgLvicyY67iZcig4vhDsZwKGU", {action: "checkout"}).then(function(token) {
+                    document.getElementById("fah-g-recaptcha-response").value = token;
+                });
+              }
+                executeRecaptcha();
+                setInterval(executeRecaptcha,30000);
+            });
+        ');
+    }
+}
+
+//add_action('wp_enqueue_scripts', 'enqueue_recaptcha_v3_script');
+
+function verify_recaptcha_v3($posted) {
+    if (isset($_POST['fah-g-recaptcha-response'])) {
+        $response = wp_remote_post("https://www.google.com/recaptcha/api/siteverify", [
+            'body' => [
+                'secret' => '6LceW4oqAAAAADx1R2rq_xbdiNkb28lqcFHM_W4_',
+                'response' => $_POST['fah-g-recaptcha-response'],
+            ]
+        ]);
+        
+        $responseBody = wp_remote_retrieve_body($response);
+        $result = json_decode($responseBody, true);
+
+        if (!$result['success'] || $result['score'] < 0.5) {
+            wc_add_notice(__('ReCAPTCHA timed out. Please refresh the page and try again.', 'woocommerce'), 'error');
+            return false;
+        }
+    } else {
+        wc_add_notice(__('Please complete the reCAPTCHA.', 'woocommerce'), 'error');
+        return false;
+    }
+
+    return true;
+}
+//add_action('woocommerce_checkout_process', 'verify_recaptcha_v3');
+
+
+// Display field below subtotal (separate block, not in table)
+add_action('woocommerce_review_order_before_payment', 'fah_display_authority_to_leave_field');
+function fah_display_authority_to_leave_field() {
+    if (get_option('wc_settings_shippit_atl_enabled') != 'no') {
+        return;
+    }
+
+    echo '<div class="fah-authority-to-leave" style="margin:20px 0; padding:15px; border:1px solid #ddd;">';
+    woocommerce_form_field('authority_to_leave', array(
+        'type'    => 'select',
+        'class'   => array('my-field-class form-row-wide atl-has-tooltip'),
+        'label'   => __('Authority to leave'),
+        'required'=> true,
+        'options' => array(
+            'default' => 'Please Select One - with the following options',
+            'Yes'     => 'Yes',
+            'No'      => 'No (Additional Fees May Apply For Redelivery)',
+            'N/A'     => 'N/A - No Shipping Required',
+        ),
+    ), WC()->session->get('authority_to_leave'));
+
+    // Add tooltip separately (not inside the label)
+    ?>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const label = document.querySelector("#authority_to_leave_field label");
+            if (label) {
+                const tooltip = document.createElement("span");
+                tooltip.className = "atl-tooltip-icon";
+                tooltip.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g clip-path="url(#clip0_151_8)">
+                    <path d="M0 4C0 1.791 1.791 0 4 0H32C34.209 0 36 1.791 36 4V32C36 34.209 34.209 36 32 36H4C1.791 36 0 34.209 0 32V4Z" fill="#2A3B8F"/>
+                    <path d="M20.5122 8.071C20.5122 9.466 19.3972 10.644 18.0012 10.644C16.6682 10.644 15.4902 9.435 15.4902 8.071C15.4902 6.8 16.6682 5.621 18.0012 5.621C19.3342 5.622 20.5122 6.769 20.5122 8.071ZM15.7682 14.799C15.7682 13.311 16.6992 12.318 18.0002 12.318C19.3022 12.318 20.2322 13.31 20.2322 14.799V26.705C20.2322 28.193 19.3022 29.185 18.0002 29.185C16.6982 29.185 15.7682 28.193 15.7682 26.705V14.799Z" fill="white"/>
+                </g>
+                <defs>
+                    <clipPath id="clip0_151_8">
+                        <rect width="36" height="36" fill="white"/>
+                    </clipPath>
+                </defs>
+            </svg>
+            <span class="atl-tooltip-text">
+                <p>By selecting ‘Yes’ at checkout (or if arranged over the phone with our Customer Service Team), you authorise France at Home’s carriers to leave your parcel at your premises as per your instructions. If ATL is selected, the carrier may leave the parcel without knocking.</p>
+                <p>You agree that the parcel is deemed received when left at your premises. France at Home and associated contractors are not responsible for any loss or damage resulting from the ATL delivery method.</p>
+                <p>If ATL is not selected, you must be available to accept delivery. Additional charges may apply for re-delivery if no one is present.</p>
+            </span>
+        `;
+                label.appendChild(tooltip);
+            }
+        });
+    </script>
+    <?php
+    echo '</div>';
+}
+
+
+
+//to fix overlap issue of  "Ship to a different address?" in checkout
+add_action('woocommerce_after_checkout_billing_form', function() {
+    echo '<div style="clear:both;"></div>';
+});
+
+
+
+function fah_hide_product_from_frontend($query) {
+    if (!is_admin() && $query->is_main_query()) {
+        $query->set('post__not_in', array(38201));
+    }
+}
+add_action('pre_get_posts', 'fah_hide_product_from_frontend');
+
+function fah_modify_shipping_method_cost_label( $label, $method ) {
+    if ( $method->get_cost() == 0 ) {
+        $label = $method->get_label(). ': <span class="woocommerce-Price-amount amount"><bdi><span class="woocommerce-Price-currencySymbol"></span>Free</bdi></span>';
+    }
+    return $label;
+}
+add_filter( 'woocommerce_cart_shipping_method_full_label', 'fah_modify_shipping_method_cost_label', 10, 2 );
+
+function add_pay_order_button_for_pending_orders($order) {
+    // Check if the order has the 'pending' status
+    if ($order->has_status('pending')) {
+        // Generate the payment URL
+        $pay_url = $order->get_checkout_payment_url();
+
+        // Output the "Pay Order" button
+        echo '<p class="woocommerce-order-actions">';
+        echo '<a href="' . esc_url($pay_url) . '" class="button pay">' . __('Pay for this order', 'woocommerce') . '</a>';
+        echo '</p>';
+    }
+}
+
+add_action('woocommerce_order_details_after_order_table', 'add_pay_order_button_for_pending_orders');
+
+function add_custom_modal_toggle_script() {
+    if (is_checkout()) {
+        wp_add_inline_script('jquery-core', '
+            jQuery(document).ready(function($) {
+                $(document).on("click", "#open-checkout-model", function(event) {
+                    event.preventDefault();
+                   $("#checkout-modal-content").toggle();
+                });
+            });
+        ');
+    }
+}
+add_action('wp_enqueue_scripts', 'add_custom_modal_toggle_script');
+
+//phone order allow admin to pay for order
+function allow_admin_to_pay_for_order(){
+    $administrator = get_role('administrator');
+    $administrator->add_cap( 'pay_for_order' );
+}
+add_action('init', 'allow_admin_to_pay_for_order');
+
+function disable_cookie_phone_order($enabled, $name, $value, $expire, $secure) {
+    $referrer_data = WC_Phone_Orders_Switch_User::get_data_from_cookie_name(WC_PHONE_ADMIN_REFERRER_COOKIE);
+    if (
+        (!is_array($referrer_data) || empty($referrer_data['is_frontend'])) &&
+        (
+            str_contains($_SERVER['REQUEST_URI'], 'order-received') ||
+            str_contains($_SERVER['REQUEST_URI'], 'order-pay')
+        )
+    ) {
+        return false;
+    }
+
+    return $enabled;
+}
+add_filter('woocommerce_set_cookie_enabled', 'disable_cookie_phone_order', 10, 5);
+
+function custom_fah_add_to_cart_popup_script() {
+    if ( is_shop() || is_product_category() ) {
+        ?>
+        <script type="text/javascript">
+            jQuery(function($){
+                $('body').on('added_to_cart', function(event, fragments, cart_hash, button ) {
+                    const successMessage = button.data('success_message');
+                    const totalQuantity = button.data('quantity');
+                    if (cart_hash) {
+                        const popupHtml = '<div id="fah-product-added-popup" class="popup" style="display:none;">' +
+                            '<p>' + totalQuantity + ' x ' + successMessage + '</p>' +
+                            '<a href="<?php echo esc_url( wc_get_cart_url() ); ?>" class="fah-view-cart-btn">View Cart</a>' +
+                            '<span id="fah-close-popup" style="position:absolute; top:10px; right:10px; cursor:pointer;">X</span>' +
+                            '</div>';
+
+                        $('body').append(popupHtml);
+                        $('#fah-product-added-popup').fadeIn();
+
+                        $('#fah-close-popup').click(function() {
+                            $('#fah-product-added-popup').fadeOut(function() {
+                                $(this).remove();
+                            });
+                        });
+                        setTimeout(function() {
+                            $('#fah-product-added-popup').fadeOut(function() {
+                                $(this).remove();
+                            });
+                        }, 3000);
+                    }
+                });
+            });
+        </script>
+        <?php
+    }
+}
+add_action('wp_footer', 'custom_fah_add_to_cart_popup_script');
+
+function custom_fah_add_to_cart_popup_single_product() {
+    if (is_product()) {
+        ?>
+        <script type="text/javascript">
+            jQuery(function($){
+                // Observe the changes to the button class
+                $('body').on('click', '.single_add_to_cart_button', function(event) {
+                    const $button = $(this);
+                    const checkIfAdded = setInterval(function() {
+                        if ($button.hasClass('added')) {
+                            const productTitle = $('.product-details-wrapper .product_title').text();
+                            const productUpdatedTitle = `"${productTitle}" has been added to your cart`;
+
+                            const popupHtml = '<div id="fah-product-added-popup" class="popup" style="display:none;">' +
+                                '<p>' + productUpdatedTitle + '</p>' +
+                                '<a href="<?php echo esc_url( wc_get_cart_url() ); ?>" class="fah-view-cart-btn">View Cart</a>' +
+                                '<span id="fah-close-popup" style="position:absolute; top:10px; right:10px; cursor:pointer;">X</span>' +
+                                '</div>';
+                            $('body').append(popupHtml);
+                            $('#fah-product-added-popup').fadeIn();
+
+                            $('#fah-close-popup').click(function() {
+                                $('#fah-product-added-popup').fadeOut(function() {
+                                    $(this).remove();
+                                });
+                            });
+
+                            setTimeout(function() {
+                                $('#fah-product-added-popup').fadeOut(function() {
+                                    $(this).remove();
+                                });
+                            }, 3000);
+
+                            clearInterval(checkIfAdded);
+                        }
+                    }, 400);
+                    setTimeout(function() {
+                        clearInterval(checkIfAdded);
+                    }, 15000);
+                });
+            });
+        </script>
+        <?php
+    }
+}
+add_action('wp_footer', 'custom_fah_add_to_cart_popup_single_product');
+
+add_action('wp_footer', 'custom_add_to_cart_button_control');
+function custom_add_to_cart_button_control() {
+    ?>
+    <style>
+        .single_add_to_cart_button, .add_to_cart_button {
+            pointer-events: none; /* Prevents clicking */
+            opacity: 0.5; /* Visual feedback that it's disabled */
+        }
+        .single_add_to_cart_button.enabled, .add_to_cart_button.enabled {
+            pointer-events: auto;
+            opacity: 1;
+        }
+    </style>
+
+    <script type="text/javascript">
+        window.addEventListener('load', function() {
+            var addToCartButtons = document.querySelectorAll('.single_add_to_cart_button, .add_to_cart_button');
+            addToCartButtons.forEach(function(button) {
+                button.classList.add('enabled');
+            });
+        });
+    </script>
+    <?php
+}
+
+
+function fah_wholesale_price_column_product_list($column, $post_id) {
+    $product = wc_get_product($post_id);
+
+    if (!$product) return;
+
+    $meta_keys = ['_wholesale_minimum_order_quantity', '_wholesale_order_quantity_step'];
+
+    $meta_key = '';
+    if ($column === 'wholesale_min_qty') {
+        $meta_key = $meta_keys[0];
+    } elseif ($column === 'wholesale_qty_step') {
+        $meta_key = $meta_keys[1];
+    }
+
+    if (!$meta_key) return;
+
+    $roles = maybe_unserialize(get_option(WWP_OPTIONS_REGISTERED_CUSTOM_ROLES));
+
+    if (!$roles) return;
+
+    foreach ($roles as $role_key => $role) {
+        if ($product->is_type('simple')) {
+            $price = get_post_meta($post_id, $role_key . $meta_key, true);
+            if ($price) {
+                echo "<strong>{$role['roleName']}</strong><p>Price: " . $price . "</p>";
+            }
+        }elseif ($product->is_type('variable')) {
+            $variations = $product->get_children();
+            foreach ($variations as $variation_id) {
+                $price = get_post_meta($variation_id, $role_key . $meta_key, true);
+                if ($price) {
+                    echo "<strong>{$role['roleName']}</strong><p>Price: " . $price . "</p>";
+                }
+                break;
+            }
+        }
+    }
+}
+add_action('manage_product_posts_custom_column', 'fah_wholesale_price_column_product_list', 10, 2);
+
+
+// Step 1: Create the admin page for export
+function fah_wholesale_export_page() {
+    ?>
+    <div class="wrap">
+        <h2>Export Wholesale Data</h2>
+        <form method="post" action="">
+            <input type="hidden" name="export_wholesale_csv" value="1" />
+            <input type="submit" class="button-primary" value="Export Wholesale Data to CSV">
+        </form>
+    </div>
+    <?php
+}
+
+add_action('admin_menu', function () {
+    add_menu_page('Wholesale Export', 'Wholesale Export', 'manage_options', 'fah-wholesale-export', 'fah_wholesale_export_page');
+});
+
+// Step 2: Catch request before page renders
+add_action('admin_init', function () {
+    if (isset($_POST['export_wholesale_csv'])) {
+        fah_export_products_csv_tt();
+    }
+});
+
+// Step 3: The CSV export function
+function fah_export_products_csv_tt() {
+    global $wpdb;
+
+    $roles = maybe_unserialize(get_option(WWP_OPTIONS_REGISTERED_CUSTOM_ROLES));
+    $product_ids = $wpdb->get_col("
+        SELECT ID 
+        FROM {$wpdb->posts} 
+        WHERE post_type = 'product' 
+        AND post_status = 'publish'
+    ");
+
+    $wholesale_data = fah_get_wholesale_price($product_ids, $roles);
+
+    // Clean any buffered output (fix for HTML issue)
+    if (ob_get_length()) ob_end_clean();
+
+    // Force download headers
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="wholesale-products.csv"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+
+    // CSV header row
+    fputcsv($output, [
+        'Product ID',
+        'Product Title',
+        'Regular Price',
+        'Cost of Good',
+        'SKU',
+        'TAX',
+        'Wholesale Price (Tier 4)',
+        'Wholesale Minimum Order Quantity (Tier 4)',
+        'Wholesale Order Quantity Step (Tier 4)',
+        'Product Type'
+    ]);
+
+    // Output rows
+    foreach ($wholesale_data as $row) {
+        fputcsv($output, [
+            $row['product_id'],
+            $row['product_title'],
+            $row['regular_price'],
+            $row['cost_of_good'],
+            $row['sku'],
+            $row['tax'],
+            $row['wholesale_price'],
+            $row['wholesale_minimum_order_quantity'],
+            $row['wholesale_order_quantity_step'],
+            $row['product_type']
+        ]);
+    }
+
+    fclose($output);
+    exit;
+}
+
+// Step 4: Function to collect wholesale product prices and details
+function fah_get_wholesale_price($product_ids, $roles) {
+    $product_detail_collector = [];
+    $meta_keys = [
+        "wholesale_minimum_order_quantity" => "_wholesale_minimum_order_quantity",
+        "wholesale_order_quantity_step"    => "_wholesale_order_quantity_step"
+    ];
+
+    // 🔹 Find the Tier 4 role key
+    $target_role_key = '';
+    foreach ($roles as $role_key => $role) {
+        if ($role['roleName'] == "Tier 4 (Main / 30% / Full)") {
+            $target_role_key = $role_key;
+            break;
+        }
+    }
+
+    if (empty($target_role_key)) {
+        return []; // If role not found, return empty
+    }
+
+    foreach ($product_ids as $post_id) {
+        $product = wc_get_product($post_id);
+        if (!$product) continue;
+
+        $variation_ids = $product->get_children();
+
+        // ---------- CASE 1: Variable product (each variation row) ----------
+        if ($variation_ids) {
+            foreach ($variation_ids as $variation_id) {
+                $variation = wc_get_product($variation_id);
+                if (!$variation) continue;
+
+                $product_data = [
+                    "product_id"                        => $variation_id,
+                    "product_title"                     => $product->get_name(),
+                    "regular_price"                     => '',
+                    "cost_of_good"                      => '',
+                    "sku"                               => $variation->get_sku(),
+                    "wholesale_price"                   => '',
+                    "wholesale_minimum_order_quantity"  => '',
+                    "wholesale_order_quantity_step"     => '',
+                    "tax"                               => '',
+                    "product_type"                      => 'variation'
+                ];
+
+                // Regular Price
+                $reg_price = $variation->get_regular_price();
+                if ($reg_price !== '') {
+                    $product_data["regular_price"] = html_entity_decode(strip_tags(wc_price($reg_price)));
+                }
+
+                // Cost of Good
+                $cog_val = get_post_meta($variation_id, '_wc_cog_cost', true);
+                if ($cog_val !== '') {
+                    $product_data["cost_of_good"] = html_entity_decode(strip_tags(wc_price($cog_val)));
+                }
+
+                // Wholesale Price
+                $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($variation_id, [$target_role_key]);
+                $price = $price_arr['wholesale_price'];
+                if (!empty($price)) {
+                    $product_data["wholesale_price"] = html_entity_decode(strip_tags(wc_price($price)));
+                }
+
+                // MOQ + Step
+                foreach ($meta_keys as $key => $meta_key) {
+                    $val = get_post_meta($variation_id, $target_role_key . $meta_key, true);
+                    if (!empty($val)) {
+                        $product_data[$key] = $val;
+                    }
+                }
+
+                // Tax Class → Tax Rate %
+                $tax_class = $variation->get_tax_class();
+                $tax_rates = WC_Tax::get_rates($tax_class);
+                if (!empty($tax_rates)) {
+                    $rate = reset($tax_rates);
+                    $product_data["tax"] = $rate['rate'] . '%';
+                }
+
+                $product_detail_collector[] = $product_data;
+            }
+        }
+        // ---------- CASE 2: Simple product ----------
+        else {
+            $product_data = [
+                "product_id"                        => $post_id,
+                "product_title"                     => $product->get_name(),
+                "regular_price"                     => '',
+                "cost_of_good"                      => '',
+                "sku"                               => $product->get_sku(),
+                "wholesale_price"                   => '',
+                "wholesale_minimum_order_quantity"  => '',
+                "wholesale_order_quantity_step"     => '',
+                "tax"                               => '',
+                "product_type"                      => 'simple'
+            ];
+
+            // Regular Price
+            $reg_price = $product->get_regular_price();
+            if ($reg_price !== '') {
+                $product_data["regular_price"] = html_entity_decode(strip_tags(wc_price($reg_price)));
+            }
+
+            // Cost of Good
+            $cog_val = get_post_meta($post_id, '_wc_cog_cost', true);
+            if ($cog_val !== '') {
+                $product_data["cost_of_good"] = html_entity_decode(strip_tags(wc_price($cog_val)));
+            }
+
+            // Wholesale Price
+            $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($post_id, [$target_role_key]);
+            $price = $price_arr['wholesale_price'];
+            if (!empty($price)) {
+                $product_data["wholesale_price"] = html_entity_decode(strip_tags(wc_price($price)));
+            }
+
+            // MOQ + Step
+            foreach ($meta_keys as $key => $meta_key) {
+                $val = get_post_meta($post_id, $target_role_key . $meta_key, true);
+                if (!empty($val)) {
+                    $product_data[$key] = $val;
+                }
+            }
+
+            // Tax Class → Tax Rate %
+            $tax_class = $product->get_tax_class();
+            $tax_rates = WC_Tax::get_rates($tax_class);
+            if (!empty($tax_rates)) {
+                $rate = reset($tax_rates);
+                $product_data["tax"] = $rate['rate'] . '%';
+            }
+
+            $product_detail_collector[] = $product_data;
+        }
+    }
+
+    return $product_detail_collector;
+}
+
+
+
+
+
+
+
+
+
+add_filter('wwp_before_wholesale_price_html_filter', 'custom_wholesale_price_only', 10, 8);
+function custom_wholesale_price_only($wholesale_price, $price, $product, $user_wholesale_role, $wholesale_price_title_text, $raw_wholesale_price, $source, $return_wholesale_price_only) {
+    $clean_price = strip_tags($wholesale_price); // Removes HTML tags
+    $clean_price = str_replace('$', '', $clean_price);
+    $clean_price = str_replace('&#36;', '', $clean_price);
+    return $clean_price;
+}
+
+// Limit Heartbeat API frequency on both admin and frontend to reduce server load
+add_filter( 'heartbeat_settings', 'fah_limit_heartbeat_everywhere' );
+function fah_limit_heartbeat_everywhere( $settings ) {
+    $settings['interval'] = 60; // Change to 30 or 120 based on your performance needs
+    return $settings;
+}
+
+add_filter( 'posts_clauses', 'fah_custom_order_by_alphabetical_title_clauses', 10 , 2);
+function fah_custom_order_by_alphabetical_title_clauses( $clauses , $wp_query ) {
+    global $wpdb;
+    if ( ! is_admin() && is_woocommerce() && $wp_query->is_main_query() && ( is_shop() || is_product_category() || is_product_tag() || is_product_taxonomy() ) ) {
+        $orderby_value = isset( $_GET['orderby'] ) ? wc_clean( $_GET['orderby'] ) : apply_filters( 'woocommerce_default_catalog_orderby', get_option( 'woocommerce_default_catalog_orderby' ) );
+        switch ( $orderby_value ) {
+            case 'alphabetical_asc_product_end':
+                $clauses['join'] .= " LEFT JOIN $wpdb->postmeta AS stock_status ON ($wpdb->posts.ID = stock_status.post_id AND stock_status.meta_key = '_stock_status')";
+                $clauses['orderby'] = "IF(stock_status.meta_value = 'instock', 0, 1) ASC, $wpdb->posts.post_title ASC";
+                break;
+
+            case 'alphabetical_dsc_product_end':
+                $clauses['join'] .= " LEFT JOIN $wpdb->postmeta AS stock_status ON ($wpdb->posts.ID = stock_status.post_id AND stock_status.meta_key = '_stock_status')";
+                $clauses['orderby'] = "IF(stock_status.meta_value = 'instock', 0, 1) ASC, $wpdb->posts.post_title DESC";
+                break;
+
+            case 'alphabetical_asc':
+                $clauses['orderby'] = "{$wpdb->posts}.post_title ASC";
+                break;
+
+            case 'alphabetical_dsc':
+                $clauses['orderby'] = "{$wpdb->posts}.post_title DESC";
+                break;
+        }
+        remove_filter( 'posts_clauses', 'fah_custom_order_by_alphabetical_title_clauses', 10 );
+    }
+    return $clauses;
+}
+
+add_filter( 'woocommerce_email_headers', 'custom_wc_reply_to_address', 10, 3 );
+function custom_wc_reply_to_address( $headers, $email_id, $object ) {
+    $custom_reply_to = 'info@franceathome.com.au';
+    $headers .= 'Reply-To: ' . $custom_reply_to . "\r\n";
+    return $headers;
+}
+
+add_filter( 'commercekit_fsn_get_cart_options', 'custom_static_free_shipping_threshold' );
+function custom_static_free_shipping_threshold( $options ) {
+    $options['amount'] = 150;
+    return $options;
+}
+
+add_action('woocommerce_order_status_changed', 'fah_adjust_stock_on_status_change', 10, 4);
+function fah_adjust_stock_on_status_change($order_id, $old_status, $new_status, $order) {
+    if (!$order || $order->get_payment_method() !== 'bacs') {
+        return;
+    }
+
+    $new_status = sanitize_key($new_status);
+
+    $increase_stock_statuses = array('cancelled', 'refunded', 'failed');
+    $decrease_stock_statuses = array(
+        'pending',
+        'processing',
+        'processing-accnt',
+        'processing-pend',
+        'on-hold',
+        'completed',
+        'pack-hold-to-pay',
+        'completed-to-pay',
+        'faire-new'
+    );
+    $neutral_stock_statuses = array('checkout-draft', 'faire-backordered');
+
+    $stock_restored = $order->get_meta('_stock_restored_on_cancel', true);
+
+    if (in_array($new_status, $increase_stock_statuses)) {
+        if ($stock_restored) {
+            return;
+        }
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if (!$product) {
+                continue;
+            }
+            if ($product->is_type('variation')) {
+                $product = wc_get_product($item->get_variation_id());
+            }
+            if ($product) {
+                $quantity = $item->get_quantity();
+                wc_update_product_stock($product, $quantity, 'increase');
+            }
+        }
+        $order->update_meta_data('_stock_restored_on_cancel', 'yes');
+        $order->save();
+    }elseif (in_array($new_status, $decrease_stock_statuses)) {
+        if (!$stock_restored) {
+            return;
+        }
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if (!$product) {
+                continue;
+            }
+            if ($product->is_type('variation')) {
+                $product = wc_get_product($item->get_variation_id());
+            }
+            if ($product) {
+                $quantity = $item->get_quantity();
+                wc_update_product_stock($product, $quantity, 'decrease');
+            }
+        }
+        $order->delete_meta_data('_stock_restored_on_cancel');
+        $order->save();
+    }elseif (in_array($new_status, $neutral_stock_statuses)) {
+        return;
+    }
+}
+
+
+//----------------------------------multiple email start------------------------------------------------------------
+
+// checkout custome filed handling
+add_action('woocommerce_after_order_notes', 'fah_additional_emails_checkout_field');
+function fah_additional_emails_checkout_field($checkout) {
+    $user_id = get_current_user_id();
+
+    $extra_admin_valid_emails = $user_id ? get_user_meta($user_id, 'extra_admin_valid_emails', true) : '';
+    $checkout_value = $checkout->get_value('fah_additional_emails');
+    $default_value = !empty($checkout_value) ? $checkout_value : (!empty($extra_admin_valid_emails) ? $extra_admin_valid_emails : '');
+
+    echo '<div id="additional_emails_checkout"><h3>' . __('Additional Email Recipients (Optional)') . '</h3>';
+    woocommerce_form_field('fah_additional_emails', array(
+        'type'        => 'textarea',
+        'class'       => array('form-row-wide'),
+        'label'       => __('Add additional email addresses (comma-separated)'),
+        'placeholder' => __('example1@mail.com, example2@mail.com'),
+        'required'    => false,
+    ), $default_value);
+    echo '</div>';
+}
+
+add_action('woocommerce_checkout_process', 'fah_validate_additional_email_fields');
+function fah_validate_additional_email_fields() {
+    if (!empty($_POST['fah_additional_emails'])) {
+        $raw_emails = sanitize_text_field($_POST['fah_additional_emails']);
+        $emails = array_map('trim', explode(',', $raw_emails));
+        foreach ($emails as $email) {
+            if (!empty($email) && !is_email($email)) {
+                wc_add_notice(sprintf(__('"%s" is not a valid email address.', 'woocommerce'), esc_html($email)), 'error');
+            }
+        }
+    }
+}
+
+add_action('woocommerce_checkout_update_order_meta', 'fah_save_additional_emails_order_meta');
+function fah_save_additional_emails_order_meta($order_id) {
+    $user_id = get_current_user_id();
+    if ($user_id) {
+        $currentMail = !empty($_POST['fah_additional_emails']) ? sanitize_text_field($_POST['fah_additional_emails']) : '';
+        $uniqueFromBothArr ='';
+        if($currentMail){
+            $priviousMail = get_user_meta($user_id, 'extra_admin_valid_emails', true);
+
+            $currentMailArr = array_filter(array_map('trim', explode(',', $currentMail)));
+            $priviousMailArr = array_filter(array_map('trim', explode(',', $priviousMail)));
+
+            $uniqueFromBothArr = array_unique(array_merge($priviousMailArr, $currentMailArr));
+            $uniqueFromBothArr = implode(',', $uniqueFromBothArr);
+        }
+
+        update_user_meta($user_id, 'extra_admin_valid_emails', $uniqueFromBothArr);
+    }
+    update_post_meta($order_id, '_fah_additional_emails', $_POST['fah_additional_emails']);
+}
+
+add_filter('woocommerce_email_headers', 'fah_bcc_additional_emails', 10, 3);
+function fah_bcc_additional_emails($headers, $email_id, $order) {
+    $order_id=false;
+    if(is_object($order)){
+        $order_id = $order->get_id();
+    }
+    if (strpos($email_id, 'customer') !== false && $order_id) {
+        $additional_emails = get_post_meta($order_id, '_fah_additional_emails', true);
+        if ($additional_emails) {
+            $emails = array_map('trim', explode(',', $additional_emails));
+            foreach ($emails as $email) {
+                $headers .= 'Bcc: ' . $email . "\r\n";
+            }
+        }
+    }
+    return $headers;
+}
+
+//account custome filed handling
+
+add_action( 'woocommerce_edit_account_form', 'add_acc_multiple_emails_field' );
+function add_acc_multiple_emails_field() {
+    $user_id = get_current_user_id();
+    $additional_emails = isset($_POST['fah_acc_additional_emails']) ? sanitize_text_field( $_POST['fah_acc_additional_emails'] ) :get_user_meta( $user_id, 'extra_admin_valid_emails', true );
+    ?>
+    <p class="woocommerce-form-row woocommerce-form-row--wide form-row form-row-wide">
+        <label for="additional_emails"><?php esc_html_e( 'Additional Email Addresses', 'woocommerce' ); ?> <span class="optional"><?php esc_html_e( '(optional)', 'woocommerce' ); ?></span></label>
+        <input type="text" class="woocommerce-Input woocommerce-Input--text input-text" name="fah_acc_additional_emails" id="fah_acc_additional_emails" value="<?php echo esc_attr( $additional_emails ); ?>" placeholder="<?php esc_attr_e( 'example1@mail.com, example2@mail.com', 'woocommerce' ); ?>" />
+        <span><em><?php esc_html_e( 'Add additional email addresses (comma-separated) (optional)', 'woocommerce' ); ?></em></span>
+    </p>
+    <?php
+}
+
+
+add_action( 'woocommerce_save_account_details_errors', 'fah_validate_acc_multi_emails', 10, 2 );
+function fah_validate_acc_multi_emails( &$errors, &$user ) {
+    if ( ! empty( $_POST['fah_acc_additional_emails'] ) ) {
+        $emails_input = sanitize_text_field( $_POST['fah_acc_additional_emails'] );
+        $emails_array = array_map( 'trim', explode( ',', $emails_input ) );
+        foreach ( $emails_array as $email ) {
+            if ( ! empty( $email ) && ! is_email( $email ) ) {
+                $errors->add( 'additional_emails_error', sprintf( __( '<strong>%s</strong> is not a valid email address.', 'woocommerce' ), esc_html( $email ) ) );
+            }
+        }
+    }
+}
+
+add_action( 'woocommerce_save_account_details', 'fah_acc_save_multi_emails', 10, 1 );
+function fah_acc_save_multi_emails( $user_id ) {
+    if (!wc_notice_count('error')) {
+        $currentMail = !empty($_POST['fah_acc_additional_emails']) ? sanitize_text_field($_POST['fah_acc_additional_emails']) : '';
+        $uniqueFromBothArr ='';
+        if($currentMail){
+            $priviousMail = get_user_meta($user_id, 'extra_admin_valid_emails', true);
+
+            $currentMailArr = array_filter(array_map('trim', explode(',', $currentMail)));
+            $priviousMailArr = array_filter(array_map('trim', explode(',', $priviousMail)));
+
+            $uniqueFromBothArr = array_unique(array_merge($priviousMailArr, $currentMailArr));
+            $uniqueFromBothArr = implode(',', $uniqueFromBothArr);
+        }
+
+        update_user_meta($user_id, 'extra_admin_valid_emails', $uniqueFromBothArr);
+    }
+}
+
+
+
+//admin custome filed handling
+
+add_action('show_user_profile', 'fah_admin_add_multiple_emails_field');
+add_action('edit_user_profile', 'fah_admin_add_multiple_emails_field');
+
+function fah_admin_add_multiple_emails_field($user) {
+    $extra_admin_valid_emails = get_user_meta($user->ID, 'extra_admin_valid_emails', true);
+    ?>
+    <h3><?php _e('Additional Email Addresses'); ?></h3>
+    <table class="form-table">
+        <tr>
+            <th><label for="fah_extra_admin_emails"><?php _e('Additional Emails'); ?></label></th>
+            <td>
+                <textarea name="fah_extra_admin_emails" id="fah_extra_admin_emails" rows="2" cols="20" placeholder="<?php esc_attr_e( 'example1@mail.com, example2@mail.com', 'woocommerce' ); ?>"><?php echo esc_textarea($extra_admin_valid_emails); ?></textarea>
+                <p class="description"><?php _e('Add additional email addresses (comma-separated) (optional)'); ?></p>
+            </td>
+        </tr>
+    </table>
+    <?php
+}
+
+add_action('personal_options_update', 'fah_admin_save_multiple_emails_field');
+add_action('edit_user_profile_update', 'fah_admin_save_multiple_emails_field');
+
+function fah_admin_save_multiple_emails_field($user_id) {
+    if (!current_user_can('edit_user', $user_id)) {
+        return false;
+    }
+
+    $fah_extra_admin_emails = sanitize_textarea_field($_POST['fah_extra_admin_emails']);
+    $extra_admin_valid_emails = '';
+
+    if (!empty($fah_extra_admin_emails)) {
+        $email_array = array_map('trim', explode(',', $fah_extra_admin_emails));
+        $valid_emails = array();
+        $invalid_emails = array();
+
+        foreach ($email_array as $email) {
+            if (is_email($email)) {
+                $valid_emails[] = $email;
+            }else{
+                $invalid_emails[] = $email;
+            }
+        }
+        $extra_admin_valid_emails = implode(',', $valid_emails);
+        $extra_admin_invalid_emails = implode(',', $invalid_emails);
+        if (!empty($extra_admin_invalid_emails)) {
+            set_transient('fah_invalid_emails_notice_' . $user_id, $extra_admin_invalid_emails, 30); // Store for 30 seconds
+        }
+    }
+
+    update_user_meta($user_id, 'extra_admin_valid_emails', $extra_admin_valid_emails);
+}
+
+add_action('admin_notices', 'fah_admin_display_invalid_emails');
+
+function fah_admin_display_invalid_emails() {
+    $screen = get_current_screen();
+    if (!in_array($screen->id, ['profile', 'user-edit'])) {
+        return;
+    }
+    $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : get_current_user_id();
+    $invalid_emails = get_transient('fah_invalid_emails_notice_' . $user_id);
+    if ($invalid_emails) {
+        ?>
+        <div class="notice notice-error is-dismissible">
+            <p><?php printf(__('The following email addresses are invalid: %s'), $invalid_emails); ?></p>
+        </div>
+        <?php
+        delete_transient('fah_invalid_emails_notice_' . $user_id);
+    }
+}
+
+
+//display additional single order email in order edit page.
+add_action('woocommerce_admin_order_data_after_shipping_address', 'fah_show_extra_emails_single_order', 10, 1);
+function fah_show_extra_emails_single_order($order) {
+    $emails = get_post_meta($order->get_id(), '_fah_additional_emails', true);
+    if (!empty($emails)) {
+        $email_list = array_map('trim', explode(',', $emails));
+        echo '<p><strong style="color: #333">Additional Emails:</strong><br>';
+        foreach ($email_list as $email) {
+            echo esc_html($email) . '<br>';
+        }
+        echo '</p>';
+    }
+}
+
+
+//----------------------------------multiple email end------------------------------------------------------------
+
+add_action( 'woocommerce_before_thankyou', 'add_resend_confirmation_email_button', 20 );
+function add_resend_confirmation_email_button( $order_id ) {
+    $order = wc_get_order( $order_id );
+    if (!$order ) {
+        return;
+    }
+    ?>
+    <div class="resend_email_container_thank_you">
+        <form id="fah-resend-email-form" method="post">
+            <?php wp_nonce_field( 'fah_resend_confirmation_email', 'fah_resend_email_nonce' ); ?>
+            <input type="hidden" name="order_id" value="<?php echo esc_attr( $order_id ); ?>">
+            <button type="submit" class="button"><?php _e( 'Re-send confirmation email', 'woocommerce' ); ?></button>
+        </form>
+        <div class="fah-spinner-thanks" style="display:none;"></div>
+        <p class="re-send-mail-thank-you" style="display:none;"></p>
+    </div>
+    <?php
+}
+
+add_action( 'wp_footer', function () {
+    if ( is_order_received_page() ) {
+        ?>
+        <script>
+            jQuery(document).ready(function($) {
+                $('#fah-resend-email-form').on('submit', function(e) {
+                    e.preventDefault();
+
+                    var form = $(this);
+                    var data = form.serialize();
+                    $('.fah-spinner-thanks').show();
+                    $('.re-send-mail-thank-you').hide().text('');
+
+                    $.ajax({
+                        url: "<?php echo admin_url('admin-ajax.php'); ?>",
+                        method: 'POST',
+                        data: data + '&action=fah_resend_confirmation_email_ajax',
+                        success: function(response) {
+                            $('.fah-spinner-thanks').hide();
+                            if (response.success) {
+                                $('.re-send-mail-thank-you').text(response.data.message).show();
+                            } else {
+                                $('.re-send-mail-thank-you').text('Something went wrong.').show();
+                            }
+                        },
+                        error: function() {
+                            $('.fah-spinner-thanks').hide();
+                            $('.re-send-mail-thank-you').text('Error sending request.').show();
+                        }
+                    });
+                });
+            });
+        </script>
+        <?php
+    }
+});
+
+add_action('wp_ajax_fah_resend_confirmation_email_ajax', 'fah_resend_confirmation_email_ajax');
+add_action('wp_ajax_nopriv_fah_resend_confirmation_email_ajax', 'fah_resend_confirmation_email_ajax');
+
+function fah_resend_confirmation_email_ajax() {
+    check_ajax_referer('fah_resend_confirmation_email', 'fah_resend_email_nonce');
+
+    if ( isset($_POST['order_id']) ) {
+        $order_id = absint($_POST['order_id']);
+        $order = wc_get_order($order_id);
+
+        if (!$order) {
+            wp_send_json_error(['message' => 'Invalid order.']);
+        }
+
+        $email_id = '';
+        $status = $order->get_status();
+        switch ( $status ) {
+            case 'processing':
+                $email_id = 'customer_processing_order';
+                break;
+            case 'completed':
+                $email_id = 'customer_completed_order';
+                break;
+            case 'on-hold':
+                $email_id = 'customer_on_hold_order';
+                break;
+            case 'refunded':
+                $email_id = 'customer_refunded_order';
+                break;
+            case 'pending':
+                $email_id = 'customer_invoice';
+                break;
+            default:
+                $email_id = 'customer_processing_order'; // Fallback to processing order
+                break;
+        }
+
+        $mailer = WC()->mailer();
+        $mails = $mailer->get_emails();
+        foreach ($mails as $mail) {
+            if ($mail->id == $email_id) {
+                $mail->trigger($order_id);
+                break;
+            }
+        }
+
+        wp_send_json_success(['message' => 'Confirmation email resent successfully.']);
+    }
+
+    wp_send_json_error(['message' => 'Invalid request.']);
+}
+
+function fah_redirect_canal_admin_product_brand() {
+    if (is_tax('product_brand', 'canal-admin')) {
+        $user = wp_get_current_user();
+        if(!in_array('Canal', (array) $user->roles)){
+            wp_redirect(home_url());
+            exit();
+        }
+    }
+}
+add_action('template_redirect', 'fah_redirect_canal_admin_product_brand');
+
+
+// Make 'Expiry date' column sortable
+add_filter('manage_edit-shop_coupon_sortable_columns', function($columns) {
+    $columns['expiry_date'] = 'date_expires';
+    return $columns;
+});
+
+add_filter('posts_clauses', 'fah_sort_coupon_by_date_expires_meta', 10, 2);
+function fah_sort_coupon_by_date_expires_meta($clauses, $query) {
+    if (
+        is_admin() &&
+        $query->is_main_query() &&
+        $query->get('post_type') === 'shop_coupon'
+    ) {
+        $orderby = $query->get('orderby');
+
+        if (in_array($orderby, ['expiry_date', 'date_expires'])) {
+            global $wpdb;
+
+            $meta_key = $orderby;
+            $order = strtoupper($query->get('order')) === 'ASC' ? 'ASC' : 'DESC';
+
+            // Ensure only one join per request
+            if (strpos($clauses['join'], "expiry_meta") === false) {
+                $clauses['join'] .= " 
+                    LEFT JOIN {$wpdb->postmeta} AS expiry_meta 
+                    ON ({$wpdb->posts}.ID = expiry_meta.post_id AND expiry_meta.meta_key = '{$meta_key}')";
+            }
+
+            // Condition for "empty" values (null, '', 0, negative)
+            $empty_check = "(
+                expiry_meta.meta_value IS NULL OR 
+                expiry_meta.meta_value = '' OR 
+                CAST(expiry_meta.meta_value AS SIGNED) < 1
+            )";
+
+            // Stable sorting: real dates first, empty last, fallback on ID
+            $clauses['orderby'] = "$empty_check ASC, 
+                FROM_UNIXTIME(CAST(expiry_meta.meta_value AS UNSIGNED)) $order,
+                {$wpdb->posts}.ID $order";
+        }
+    }
+
+    return $clauses;
+}
+
+add_action('init', function() {
+    remove_action('woocommerce_before_shop_loop', 'woocommerce_result_count', 20);
+    remove_action('woocommerce_after_shop_loop', 'woocommerce_result_count', 20);
+});
+
+//add_action('woocommerce_admin_order_data_after_order_details', 'recalculate_order_total_on_edit_page', 10, 1);
+function recalculate_order_total_on_edit_page($order) {
+    $screen = get_current_screen();
+    if (!$screen || $screen->id !== 'shop_order') {
+        return;
+    }
+    $phone_order = $order->get_meta( WC_Phone_Orders_Loader::$meta_key_order_creator, true );
+    $giftcard_order = $order->get_items( 'pw_gift_card' );
+    write_log_to_wp_content('phone_order');
+    write_log_to_wp_content($phone_order);
+
+    write_log_to_wp_content('gift_card');
+    write_log_to_wp_content($giftcard_order);
+}
+
+//add_action('woocommerce_checkout_order_processed', 'recalculate_order_total_on_gift_card', 10, 3);
+
+function recalculate_order_total_on_gift_card($order_id, $posted_data, $order) {
+    $has_pw_gift_card = $order->get_items( 'pw_gift_card' );
+
+    if ( empty($has_pw_gift_card) ) {
+        return;
+    }
+
+    write_log_to_wp_content('cart items');
+    $order->get_items();
+
+
+    // Calculate
+    $total_old = $order->get_total();
+    write_log_to_wp_content('old total'.$total_old);
+
+    //manually recalculation to check price difference
+    $order->calculate_totals(true);
+
+    $total_new = $order->get_total();
+    write_log_to_wp_content('net total'.$total_new);
+
+
+
+    // Calculate difference
+    $get_difference_amount = $total_old - $total_new;
+
+    // Only proceed if there's a difference
+    if (false) {
+        $fee = new WC_Order_Item_Fee();
+        $fee->set_name('fah fix calculation fees');
+        $fee->set_amount(-$get_difference_amount);
+        $fee->set_total(-$get_difference_amount);
+        $fee->add_meta_data('fah_fix_calculation_fees', 'fah-fix-calculation-fees', true);
+        $order->add_item($fee);
+        $order->calculate_totals(true);
+        $order->save();
+    }
+
+}
+
+
+
+add_action('woocommerce_after_shipping_rate', 'fah_notice_below_express_shipping_method', 10, 2);
+function fah_notice_below_express_shipping_method($method, $index) {
+    //So the condition only triggers when:
+        //(1) Cart has refrigerated items
+        //(2) Express shipping exists
+        //(3) Refrigerated shipping does not exist
+    $has_dairy_product = false;
+    $dairy_refri_args = array(
+        'taxonomy'     => 'product_cat',
+        'parent'       => 1972,
+        'orderby'      => 'name',
+        'order'        => 'ASC',
+        'hide_empty'   => false,
+        'fields'       => 'slugs',
+    );
+
+    $dairy_refri_cat = get_terms($dairy_refri_args);
+    $dairy_refri_cat[] = 'dairy-refrigerated';
+
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        $terms =  wc_get_product_terms( $product->get_id(), 'product_cat', array( 'fields' => 'all' ) );
+        foreach ( $terms as $term ) {
+            if (in_array(trim($term->slug), $dairy_refri_cat)){
+                $has_dairy_product= true;
+                break;
+            }
+        }
+        if ($has_dairy_product) {
+            break;
+        }
+    }
+
+    // shipping options Refrigerated
+    $refri_shipping_option_available = false;
+    $keywords = ['Refrigerated', 'business', 'days', 'Est'];
+
+    $packages = WC()->shipping()->get_packages();
+    $names = array_map(function($rate) {
+        return $rate->get_label();
+    }, array_values($packages[0]['rates']));
+
+
+    foreach ($names as $name) {
+        $all_present = true;
+
+        foreach ($keywords as $word) {
+            if (stripos($name, $word) === false) { // word not found
+                $all_present = false;
+                break;
+            }
+        }
+
+        if ($all_present) {
+            $refri_shipping_option_available = true;
+            break; // stop if one method matches
+        }
+    }
+
+
+    if (
+        $has_dairy_product &&
+        $method->id == 'tree_table_rate:83c829a8_express_shipping' &&
+        !$refri_shipping_option_available
+    ) {
+        echo '<div style="margin-top: 8px; font-size: 14px; color: #2a3b8f;">
+                 ⚠️ It looks like your cart contains fresh products, but unfortunately, our refrigerated couriers do not service your area. Please remove any refrigerated items from your cart if you wish to see standard shipping options.
+              </div>';
+    }
+}
+
+add_action('template_redirect','fah_cgkit_wishlist_url_change' );
+function fah_cgkit_wishlist_url_change() {
+    if (is_account_page()) {
+        ob_start(function ($html) {
+            return preg_replace(
+                '#(/my-account/)(?!cgkit-wishlist)([^"\']*\?wpage=\d+)#i',
+                '/my-account/cgkit-wishlist/$2',
+                $html
+            );
+        });
+    }
+}
+
+
+// Shortcode: [brand_filter_ajax]
+add_shortcode('fah_filter_products_by_brand', function() {
+    return;
+    if (!is_shop() && !is_product_category() && !is_search()) {
+        return ''; // Only show on product archives/search
+    }
+
+    global $wp_query;
+
+    // Collect product IDs from current loop
+    $product_ids = wp_list_pluck($wp_query->posts, 'ID');
+
+    if (empty($product_ids)) {
+        return;
+    }
+
+    // Get brands assigned to these products
+    $brands = wp_get_object_terms($product_ids, 'product_brand', [
+        'hide_empty' => true,
+    ]);
+
+    if (empty($brands)) {
+        return '<p>No brands available.</p>';
+    }
+
+    ob_start(); ?>
+    <div class="fah-filter-products-by-brand">
+        <form id="fah-filter-products-by-brand-form">
+            <?php foreach ($brands as $brand): ?>
+                <label class="fah-filter-products-by-brand-label">
+                    <input type="checkbox" name="brand[]" value="<?php echo esc_attr($brand->slug); ?>">
+                    <?php echo esc_html($brand->name); ?>
+                </label><br>
+            <?php endforeach; ?>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const form = document.getElementById("fah-filter-products-by-brand-form");
+            if (!form) return;
+
+            form.addEventListener("change", function() {
+                let selected = [];
+                form.querySelectorAll("input[name='brand[]']:checked").forEach(el => {
+                    selected.push(el.value);
+                });
+
+                let data = new FormData();
+                data.append("action", "fah_filter_products_by_brand");
+                data.append("brands", selected.join(","));
+                data.append("query_vars", JSON.stringify(<?php echo json_encode($wp_query->query_vars); ?>));
+
+                fetch("<?php echo admin_url('admin-ajax.php'); ?>", {
+                    method: "POST",
+                    body: data
+                })
+                    .then(res => res.text())
+                    .then(html => {
+                        let container = document.querySelector(".products");
+                        if (container) {
+                            container.innerHTML = html;
+                        }
+                    });
+            });
+        });
+    </script>
+    <?php
+    return ob_get_clean();
+});
+
+
+// AJAX callback
+add_action('wp_ajax_fah_filter_products_by_brand', 'fah_filter_products_by_brand_callback');
+add_action('wp_ajax_nopriv_fah_filter_products_by_brand', 'fah_filter_products_by_brand_callback');
+
+function fah_filter_products_by_brand_callback() {
+    $brands = !empty($_POST['brands']) ? explode(',', sanitize_text_field($_POST['brands'])) : [];
+    $query_vars = json_decode(stripslashes($_POST['query_vars']), true);
+
+    if (!empty($brands)) {
+        $query_vars['tax_query'][] = [
+            'taxonomy' => 'product_brand',
+            'field'    => 'slug',
+            'terms'    => $brands,
+        ];
+    }
+
+    $query = new WP_Query($query_vars);
+
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+            wc_get_template_part('content', 'product');
+        }
+    } else {
+        echo '<p>No products found.</p>';
+    }
+
+    wp_reset_postdata();
+}
+
+
+add_action( 'wp_head', 'fah_hide_best_before_outofstock' );
+function fah_hide_best_before_outofstock() {
+    echo '<style>
+        li.product.outofstock .best-before-text {
+            display: none !important;
+        }
+    </style>';
+}
+
+
+add_action('wp_footer', function () {
+    if (is_tax('product_region')) {
+        ?>
+        <script>
+            document.addEventListener("DOMContentLoaded", function() {
+                let target = document.querySelector(".below-content") || document.querySelector(".site-footer");
+                if (target) {
+                    let div = document.createElement("div");
+                    div.className = "col-full fah-region-main";
+                    div.innerHTML = `
+                    <h2 class="fah-region-heading">French Regional Favourites</h2>
+                    <p>We’re always adding authentic products from regions across France. Have a specialty you’d like us to stock? Send us your product suggestion and help shape our range.</p>
+                     <div class="fah-region-button-container">
+                        <a class="fah-region-button button" href="/contact-us/?enquiry=Product%20Suggestion">
+                            <span class="kb-svg-icon-wrap kb-svg-icon-fe_externalLink kt-btn-icon-side-left">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                                </svg>
+                            </span>
+                           <span class="kt-btn-inner-text">Make a Product Suggestion</span>
+                        </a>
+                      </div>
+                     `;
+                    target.parentNode.insertBefore(div, target);
+                }
+            });
+        </script>
+        <?php
+    }
+});
+
+add_filter('wp_nav_menu_objects', 'custom_menu_item_text', 10, 2);
+function custom_menu_item_text($menu_items, $args) {
+    if (!is_user_logged_in()) {
+        foreach ($menu_items as $menu_item) {
+            if ($menu_item->ID == 197048 || $menu_item->ID == 336612 ) {
+                $menu_item->title = 'Sign In';
+                break;
+            }
+        }
+    }
+    return $menu_items;
+}
+
+
+function fah_footer_my_account_text() {
+    if ( ! is_user_logged_in() ) {
+        ?>
+        <script>
+            document.addEventListener("DOMContentLoaded", function() {
+                const link = document.querySelector('li.wp-block-kadence-listitem a[href*="/my-account/"]');
+                if (link && link.textContent.trim() === "My Account") {
+                    link.textContent = "Sign In";
+                }
+            });
+        </script>
+        <?php
+    }
+}
+//add_action( 'wp_footer', 'fah_footer_my_account_text', 20 );
+
+
+//Step 1 to add button in admin under product section
+function fah_add_export_button_under_products_menu() {
+    add_submenu_page(
+        'edit.php?post_type=product',             // Parent slug for "Products"
+        'Enable/Disable Export Button',           // Page title (top of admin page)
+        'Export Purchased/Category Products',              // Menu title (in sidebar under Products)
+        'manage_options',                         // Capability
+        'export_button_control',                  // Menu slug (used in URL)
+        'fah_render_expp_button_page'               // Callback to render the page
+    );
+}
+add_action('admin_menu', 'fah_add_export_button_under_products_menu');
+
+//Step 2 handle button click from admin to enable and disable
+function fah_render_expp_button_page() {
+    if (!empty($_POST['fah_toggle_expp_button'])) {
+        $current_state = get_option('admin_fah_toggle_expp_button_enabled', false);
+        update_option('admin_fah_toggle_expp_button_enabled', !$current_state);
+    }
+    ?>
+    <div class="wrap">
+        <h1>Export Purchased/Category Products Control</h1>
+        <form method="post">
+            <input type="hidden" name="fah_toggle_expp_button" value="1" />
+            <p>
+                <button type="submit" class="button button-primary">
+                    <?php echo get_option('admin_fah_toggle_expp_button_enabled') ? 'Disable' : 'Enable'; ?> Export Button
+                </button>
+            </p>
+        </form>
+    </div>
+    <?php
+}
+
+//to export Purchased product
+//step 3 we created button in frontend in this method (fah_purchased_products_content());
+
+//to export current category product
+//step 3 we created button in category page;
+add_action( 'woocommerce_before_main_content', 'fah_add_download_csv_form', 20 );
+function fah_add_download_csv_form() {
+    $is_button_enabled = get_option('admin_fah_toggle_expp_button_enabled', false);
+    $Current_user_role = WWP_Wholesale_Roles::getInstance()->getUserWholesaleRole();
+    $isActiveCategoryBtn = !empty($is_button_enabled) && !empty($Current_user_role[0]);
+
+    if ( is_product_category() && $isActiveCategoryBtn ) {
+        $term = get_queried_object();
+        ?>
+        <form class="fah_exp_category_container" method="post">
+            <input type="hidden" name="fah_exp_category_csv" value="1">
+            <input type="hidden" name="fah_current_page_cat_id" value="<?php echo esc_attr($term->term_id); ?>">
+            <button type="submit" class="button">Export All Products</button>
+        </form>
+        <?php
+    }
+}
+
+//Step 4 handle button click from frontend to download csv
+add_action('init', 'fah_export_purchased_products_csv');
+function fah_export_purchased_products_csv() {
+    // Check for required conditions: admin, user logged in, and one of the form keys set
+    if (is_admin() || !is_user_logged_in() || (!isset($_POST['fah_export_purchased_csv']) && !isset($_POST['fah_exp_category_csv']))) {
+        return;
+    }
+
+    $Product_ids = [];
+    $csv_file_name = '';
+
+    // Check if the form is for "fah_export_purchased_csv" or "fah_exp_category_csv"
+    if (!empty($_POST['fah_export_purchased_csv'])) {
+        $csv_file_name ='purchased-products.csv';
+        // Fetch purchased products by the current user
+        $Product_ids = fah_products_bought_by_curr_user(true);
+    } elseif (!empty($_POST['fah_exp_category_csv'])) {
+        $csv_file_name ='current-category-products.csv';
+        // Fetch products in the current category
+        $Product_ids = get_posts([
+            'post_type'      => 'product',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'tax_query'      => [
+                [
+                    'taxonomy' => 'product_cat',
+                    'field'    => 'term_id',
+                    'terms'    => intval($_POST['fah_current_page_cat_id']),
+                ],
+            ],
+        ]);
+    }
+
+    $meta_keys = [
+        "wholesale_minimum_order_quantity" => "_wholesale_minimum_order_quantity",
+        "wholesale_order_quantity_step"    => "_wholesale_order_quantity_step"
+    ];
+
+    function fah_get_wholesale_price_current_user($product_id, $user_wholesale_role) {
+        $price_arr = WWP_Wholesale_Prices::get_product_wholesale_price_on_shop_v3($product_id, [$user_wholesale_role]);
+        return isset($price_arr['wholesale_price']) ? $price_arr['wholesale_price'] : 0;
+    }
+
+    $Current_user_role = WWP_Wholesale_Roles::getInstance()->getUserWholesaleRole();
+    $user_role_key     = !empty($Current_user_role[0]) ? $Current_user_role[0] : ''; // Safe role key
+
+    if (empty($Product_ids) || empty($user_role_key)) {
+        return;
+    }
+
+    $csv_data   = [];
+    // ✅ Added Stock Status column
+    $csv_data[] = ['Product Name', 'Price', 'SKU', 'Min Qty', 'Qty Step', 'Stock Status'];
+
+    foreach ($Product_ids as $id) {
+        $product = wc_get_product($id);
+        if (!$product) continue;
+
+        $variationIds  = $product->get_children();
+        $price_display = '';
+        $min_qty       = '';
+        $qty_step      = '';
+        $stock_status  = $product->is_in_stock() ? 'In Stock' : 'Out of Stock';
+
+        if (!empty($variationIds)) {
+            $prices = [];
+            $valid_variations = [];
+
+            foreach ($variationIds as $variation_id) {
+                $variation = wc_get_product($variation_id);
+
+                if ($variation && $variation->get_status() === 'publish' && $variation->is_purchasable()) {
+                    $valid_variations[] = $variation;
+
+                    $variation_price = fah_get_wholesale_price_current_user($variation_id, $user_role_key);
+                    if (!empty($variation_price)) {
+                        $prices[] = (float) $variation_price;
+                    }
+                }
+            }
+
+            if (!empty($prices)) {
+                $min_price = min($prices);
+                $max_price = max($prices);
+
+                $price_display = ($min_price == $max_price)
+                    ? html_entity_decode(strip_tags(wc_price($min_price)))
+                    : html_entity_decode(strip_tags(wc_price($min_price))) . ' - ' . html_entity_decode(strip_tags(wc_price($max_price)));
+            }
+
+            if (!empty($valid_variations)) {
+                $first_variation_id = $valid_variations[0]->get_id();
+                $min_qty  = get_post_meta($first_variation_id, $user_role_key . $meta_keys['wholesale_minimum_order_quantity'], true);
+                $qty_step = get_post_meta($first_variation_id, $user_role_key . $meta_keys['wholesale_order_quantity_step'], true);
+
+                // ✅ If parent says out of stock but variation is available → mark "In Stock"
+                foreach ($valid_variations as $variation) {
+                    if ($variation->is_in_stock()) {
+                        $stock_status = 'In Stock';
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Simple product
+            $price = fah_get_wholesale_price_current_user($id, $user_role_key);
+            if (!empty($price)) {
+                $price_display = html_entity_decode(strip_tags(wc_price($price)));
+            }
+
+            $min_qty  = get_post_meta($id, $user_role_key . $meta_keys['wholesale_minimum_order_quantity'], true);
+            $qty_step = get_post_meta($id, $user_role_key . $meta_keys['wholesale_order_quantity_step'], true);
+        }
+
+        if (!empty($price_display)) {
+            $csv_data[] = [
+                $product->get_name(),
+                $price_display,
+                $product->get_sku(),
+                $min_qty,
+                $qty_step,
+                $stock_status // ✅ Added here
+            ];
+        }
+    }
+
+    if (ob_get_length()) ob_end_clean();
+
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment;filename='.$csv_file_name);
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+    foreach ($csv_data as $row) {
+        fputcsv($output, $row);
+    }
+    fclose($output);
+    exit;
+}
+
+
+
+
+function write_log_to_wp_content($message) {
+    $log_file = WP_CONTENT_DIR . '/custom-log.txt';
+    if (is_array($message) || is_object($message)) {
+        $message = print_r($message, true);
+    }
+    $log_entry = "[" . date("Y-m-d H:i:s") . "] " . $message . PHP_EOL;
+    file_put_contents($log_file, $log_entry, FILE_APPEND);
+}
+
+
